@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Secrets
+.env
+.env.*
+
+# Data & training outputs
+datasets/
+runs/
+
+# Local imports
+_import/
+
+# OS
+.DS_Store
