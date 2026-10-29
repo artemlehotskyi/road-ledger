@@ -1,4 +1,5 @@
-"""Build api/data/contracts.json from _import/road_ledger_verified.xlsx (sheet «Договори»).
+"""Build api/data/contracts.json from _import/road_ledger_verified.xlsx (sheet «Договори»)
+plus the cached Prozorro JSON in _import/prozorro/<tender id>/ (tender.json, contract.json).
 
 Usage: python api/build_ledger.py [path/to/road_ledger_verified.xlsx]
 """
@@ -14,7 +15,9 @@ from streets import street_keys, locality
 
 ROOT = Path(__file__).resolve().parent.parent
 XLSX = ROOT / "_import" / "road_ledger_verified.xlsx"
+PROZORRO_DIR = ROOT / "_import" / "prozorro"
 OUT = Path(__file__).resolve().parent / "data" / "contracts.json"
+CONTRACT_API = "https://public-api.prozorro.gov.ua/api/2.5/contracts/"
 SHEET = "Договори"
 EXCLUDED_WORK_TYPES = {"інше"}
 
@@ -76,6 +79,63 @@ def tender_id(contract_id):
     return re.sub(r"-[a-z]\d+$", "", contract_id)
 
 
+# Where in the street the works were, as worded in the Prozorro tender title. First match wins.
+SITE_PATTERNS = [re.compile(p) for p in (
+    r"на ділянці [^)]+",
+    r"(?:на )?перехрест\w* [^)(]+",
+    r"від (?:вул|буд|перех|трас|пров)[^)(]+? до [^)(,]+",
+    r"між будинками [^)(]+",
+    r"з торців будинків [^)(]+",
+    r"в районі [^)(]+",
+    r"зі? сторони [^)(]+",
+    r"(?:ЗОШ|КП|КНП|на території)[^)(]*?(?:вул\.|вулиці )\s?[^,()]+,\s?\d[^)(\s]*",
+    r"(?:вул\.|вулиці|бульв\.|бульварі|провулку)\s?[^,()]+?,?\s\d+[А-Яа-я]?(?:\s?(?:і|та|-|–)\s?№?\d+[А-Яа-я]?)*",
+)]
+CITY_TAIL = re.compile(r",?\s*в\s+(?:м\.\s*|с\.\s*)\S.*$")
+
+
+def site_from_title(title):
+    """«…вул. Льва Толстого (на ділянці від вул. Гідності до провулку Польового) в с. Коровія…»
+    -> «на ділянці від вул. Гідності до провулку Польового»; None if the title names only the street."""
+    t = re.sub(r"\s+", " ", title).strip()
+    for pattern in SITE_PATTERNS:
+        m = pattern.search(t)
+        if m:
+            return CITY_TAIL.sub("", m.group(0)).strip(" ,.")
+    return None
+
+
+# Works on the grounds of an institution or inside a residential block, not on the street network.
+# Matched in the Prozorro tender title; the first matching marker is kept as scope_basis.
+TERRITORY_MARKERS = [re.compile(p) for p in (
+    r"ЗОШ",
+    r"на території",
+    r"майданчик\w*",
+    r"дворов\w+ покритт\w+",
+    r"баскетбольн\w+ пол\w+",
+    r"прибудинков\w+ територі\w+",
+    r"міжбудинков\w+ проїзд\w*",
+)]
+
+
+def scope_from_title(title):
+    """("street" | "territory", basis). street: carriageway, sidewalk, intersection;
+    territory: school yard, playground, grounds of an institution, inter-block driveway."""
+    for marker in TERRITORY_MARKERS:
+        m = marker.search(title)
+        if m:
+            return "territory", f"у назві тендеру «{m.group(0)}»"
+    return "street", None
+
+
+def prozorro(tid, name):
+    path = PROZORRO_DIR / tid / name
+    if not path.exists():
+        raise SystemExit(f"missing {path.relative_to(ROOT)}: download it from Prozorro first")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("data", data)
+
+
 def build(xlsx_path):
     wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     rows = list(wb[SHEET].iter_rows(values_only=True))
@@ -92,6 +152,11 @@ def build(xlsx_path):
         keys = street_keys(street)
         tid = tender_id(row["Номер договору"])
         contractor, contractor_full = contractor_names(row)
+        # The xlsx «Назва» column is shifted or generic in many rows; the title comes from Prozorro.
+        title = re.sub(r"\s+", " ", prozorro(tid, "tender.json")["title"]).strip()
+        contract = prozorro(tid, "contract.json")
+        if contract["contractID"] != row["Номер договору"]:
+            raise SystemExit(f"contract.json is for {contract['contractID']}, not {row['Номер договору']}")
         contracts.append({
             "id": tid,
             "contract_id": row["Номер договору"],
@@ -103,7 +168,13 @@ def build(xlsx_path):
             "contractor_full": contractor_full,
             "amount": row["Сума, грн"],
             "work_type": row["work_type"],
-            "title": row["Назва / що ремонтували"],
+            "title": title,
+            "site": site_from_title(title),
+            "scope": scope_from_title(title)[0],
+            "scope_basis": scope_from_title(title)[1],
+            "contract_number": contract.get("contractNumber"),
+            "date_signed": (contract.get("dateSigned") or "")[:10] or None,
+            "contract_url": CONTRACT_API + contract["id"],
             "warranty_months": row["warranty_months_verified"],
             "warranty_until": iso(row["warranty_until_estimate"]),
             "warranty_source": warranty_source(row),

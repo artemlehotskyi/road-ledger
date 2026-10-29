@@ -27,7 +27,7 @@ ALIASES_PATH = API_DIR / "data" / "street_aliases.json"
 CONF = 0.25
 CLASS_MIN_CONF = {"crack": 0.5}
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 USER_AGENT = "RoadLedger/0.1"
 # Rough box around Chernivtsi city hromada; the authoritative check is Nominatim's address.
 CHERNIVTSI_BBOX = (48.20, 25.80, 48.40, 26.10)  # lat_min, lon_min, lat_max, lon_max
@@ -102,9 +102,9 @@ _geo_lock = threading.Lock()
 _geo_last_call = [0.0]
 
 
-def reverse_geocode(lat, lon):
-    """Nominatim reverse lookup, cached in memory; at most 1 request/s per the usage policy."""
-    key = (round(lat, 5), round(lon, 5))
+def nominatim(path, params):
+    """One Nominatim request, cached in memory; at most 1 request/s across all endpoints per the usage policy."""
+    key = (path, tuple(sorted(params.items())))
     if key in _geo_cache:
         return _geo_cache[key]
     with _geo_lock:
@@ -114,18 +114,46 @@ def reverse_geocode(lat, lon):
         if wait > 0:
             time.sleep(wait)
         try:
-            r = state["http"].get(NOMINATIM_URL, params={
-                "lat": lat, "lon": lon, "format": "jsonv2", "zoom": 17,
-                "addressdetails": 1, "accept-language": "uk",
-            })
+            r = state["http"].get(f"{NOMINATIM_URL}/{path}", params={
+                **params, "format": "jsonv2", "addressdetails": 1, "accept-language": "uk"})
             r.raise_for_status()
             data = r.json()
         except (httpx.HTTPError, ValueError) as e:
-            raise HTTPException(502, f"Nominatim reverse geocoding failed: {e}")
+            raise HTTPException(502, f"Nominatim {path} failed: {e}")
         finally:
             _geo_last_call[0] = time.monotonic()
         _geo_cache[key] = data
         return data
+
+
+def reverse_geocode(lat, lon):
+    return nominatim("reverse", {"lat": round(lat, 5), "lon": round(lon, 5), "zoom": 17})
+
+
+def address_in_city(address):
+    return bool(CHERNIVTSI_NAMES & {address.get("city"), address.get("municipality")})
+
+
+def search_places(q):
+    """Streets and addresses inside the Chernivtsi box, for the map screen; one row per street and locality."""
+    lat_min, lon_min, lat_max, lon_max = CHERNIVTSI_BBOX
+    found = nominatim("search", {
+        "q": q.strip(), "viewbox": f"{lon_min},{lat_max},{lon_max},{lat_min}", "bounded": 1,
+        "countrycodes": "ua", "limit": 10,
+    })
+    results, seen = [], set()
+    for item in found:
+        address = item.get("address") or {}
+        road = address.get("road")
+        if not road or not address_in_city(address):
+            continue
+        name = f"{road}, {address['house_number']}" if address.get("house_number") else road
+        place = address.get("village") or address.get("hamlet") or address.get("suburb") or address.get("city")
+        if (name, place) in seen:
+            continue
+        seen.add((name, place))
+        results.append({"name": name, "place": place, "lat": float(item["lat"]), "lon": float(item["lon"])})
+    return results
 
 
 def in_chernivtsi_bbox(lat, lon):
@@ -139,8 +167,7 @@ def resolve_street(lat, lon):
         return None, None, False
     data = reverse_geocode(lat, lon)
     address = data.get("address") or {}
-    in_city = bool(CHERNIVTSI_NAMES & {address.get("city"), address.get("municipality")})
-    if not in_city:
+    if not address_in_city(address):
         return None, None, False
     # Villages of the city hromada (e.g. Коровія) are matched separately from city streets.
     locality = None if address.get("city") == "Чернівці" else address.get("village") or address.get("hamlet")
@@ -152,13 +179,14 @@ def resolve_street(lat, lon):
 
 # --- ledger ------------------------------------------------------------------
 
-def find_contracts(street, locality):
-    """Returns [(contract, alias)]; alias is None for a direct name match,
-    else the data/street_aliases.json row (renamed street or another case form in the ledger)."""
+def find_contracts(street, locality, scope="street"):
+    """Contracts of one scope on the street. Returns [(contract, alias)]; alias is None for a direct name match,
+    else the data/street_aliases.json row (renamed street or another case form in the ledger).
+    Only scope="street" feeds the verdict; "territory" (school yards etc.) is listed as other works."""
     aliases = state["aliases"].get((locality, street["key"]), [])
     found = []
     for c in state["contracts"]:
-        if c["locality"] != locality:
+        if c["scope"] != scope or c["locality"] != locality:
             continue
         if any(keys_match(k, street["key"]) for k in c["street_keys"]):
             found.append((c, None))
@@ -206,33 +234,50 @@ def fmt_date(iso):
     return dt.date.fromisoformat(iso).strftime("%d.%m.%Y")
 
 
+VERDICT_TITLE = {
+    "active_high": "Можливий гарантійний випадок",
+    "active_medium": "Потребує перевірки",
+    "expired": "Гарантія, ймовірно, закінчилась",
+    "unknown": "Недостатньо даних",
+    "no_contracts": "Ремонтів у базі немає",
+    "no_location": "Немає координат",
+}
+COVERAGE = "База охоплює договори Департаменту інфраструктури та благоустрою за 2023–2026 роки."
+
+
 def summarize(location, street, in_city, contracts, detections):
+    """We don't establish the contractor's liability: the summary points to a possible warranty case to check."""
     defects = "Дефектів не виявлено. " if not detections else ""
+
+    def out(verdict, headline, title_key=None):
+        return {"verdict": verdict, "title": VERDICT_TITLE[title_key or verdict], "headline": defects + headline}
+
     if location is None:
-        return {"verdict": "no_location",
-                "headline": defects + "Немає координат: додайте геолокацію, щоб перевірити гарантію."}
+        return out("no_location", "Немає координат: додайте геолокацію, щоб перевірити гарантію.")
     if not in_city:
-        return {"verdict": "no_contracts", "headline": defects + "Точка поза межами Чернівців."}
+        return out("no_contracts", "Точка поза межами Чернівців.")
     if street is None:
-        return {"verdict": "no_contracts", "headline": defects + "Не вдалося визначити вулицю за координатами."}
+        return out("no_contracts", "Не вдалося визначити вулицю за координатами.")
     if not contracts:
-        return {"verdict": "no_contracts",
-                "headline": defects + f"На вулиці «{street['name']}» договорів на ремонт у базі немає."}
+        return out("no_contracts", f"На вулиці «{street['name']}» договорів на ремонт у базі немає. {COVERAGE}")
 
     active = [c for c in contracts if c["verdict"] == "active"]
     if active:
         c = max(active, key=headline_priority)
         terms = DRAFT_TERMS if c["warranty_confidence"] == "medium" else ""
-        return {"verdict": "active", "headline": defects + (
-            f"Гарантія діє орієнтовно до {fmt_date(c['warranty_until'])}{terms}: "
-            f"дефекти має усунути підрядник {c['contractor']} за власний рахунок.")}
-    if any(c["verdict"] == "unknown" for c in contracts):
-        return {"verdict": "unknown", "headline": defects + (
-            "Ремонт тут був, але строк гарантії невідомий: у документах на Prozorro його немає.")}
+        return out("active", (
+            f"На цій вулиці є договір на ремонт з гарантією орієнтовно до {fmt_date(c['warranty_until'])}{terms}. "
+            f"Якщо дефект на ділянці, яку ремонтував {c['contractor']}, його можуть зобов’язати "
+            f"усунути дефект за власний рахунок."), f"active_{c['warranty_confidence']}")
+    unknown = [c for c in contracts if c["verdict"] == "unknown"]
+    if unknown:
+        if all(c["status_check"] == "no_docs" for c in unknown):
+            return out("unknown", "Документів для перевірки гарантії на Prozorro не опубліковано.")
+        return out("unknown", "Ремонт тут був, але строку гарантії в документах на Prozorro не знайдено.")
     c = max(contracts, key=headline_priority)
     terms = DRAFT_TERMS if c["warranty_confidence"] == "medium" else ""
-    return {"verdict": "expired", "headline": defects + (
-        f"Гарантія підрядника {c['contractor']}{terms} скінчилась орієнтовно {fmt_date(c['warranty_until'])}.")}
+    return out("expired", (
+        f"Гарантія підрядника {c['contractor']}{terms} закінчилась орієнтовно {fmt_date(c['warranty_until'])}."))
 
 
 # --- routes ------------------------------------------------------------------
@@ -245,6 +290,20 @@ def health():
 @app.get("/contracts")
 def contracts():
     return state["contracts"]
+
+
+@app.get("/geocode/reverse")
+def geocode_reverse(lat: float, lon: float):
+    """Nearest street for the map screen, the same lookup /analyze uses."""
+    street, _, inside = resolve_street(lat, lon)
+    return {"street": street["name"] if street else None, "in_city": inside}
+
+
+@app.get("/geocode/search")
+def geocode_search(q: str):
+    if len(q.strip()) < 3:
+        return {"results": []}
+    return {"results": search_places(q)}
 
 
 @app.post("/analyze")
@@ -267,16 +326,21 @@ def analyze(image: UploadFile = File(...), lat: float | None = Form(None), lon: 
     else:
         location = None
 
-    street, locality, in_city, matched = None, None, False, []
+    street, locality, in_city, matched, other_works = None, None, False, [], []
     if location:
         street, locality, in_city = resolve_street(location["lat"], location["lon"])
         if street:
             today = dt.date.today()
-            matched = [
-                {**c, "verdict": verdict(c, today), "warranty_confidence": warranty_confidence(c),
-                 "matched_alias": alias_info(alias)}
-                for c, alias in find_contracts(street, locality)
-            ]
+
+            def enrich(found):
+                return [
+                    {**c, "verdict": verdict(c, today), "warranty_confidence": warranty_confidence(c),
+                     "matched_alias": alias_info(alias)}
+                    for c, alias in found
+                ]
+            matched = enrich(find_contracts(street, locality))
+            # works on the grounds of institutions at this street: shown, but not part of the verdict
+            other_works = enrich(find_contracts(street, locality, "territory"))
 
     return {
         "detections": detections,
@@ -284,5 +348,6 @@ def analyze(image: UploadFile = File(...), lat: float | None = Form(None), lon: 
         "location": location,
         "street": street,
         "contracts": matched,
+        "other_works": other_works,
         "summary": summarize(location, street, in_city, matched, detections),
     }

@@ -3,9 +3,9 @@
 FastAPI service behind the Road Ledger app. You send it a photo of a road. It does four things:
 
 1. **Detect defects.** The YOLO11s model (`../model/weights/best.pt`) finds `pothole`, `patching` and `crack`. A crack is reported only at confidence ≥ 0.5, the other classes at ≥ 0.25.
-2. **Locate the photo.** It uses `lat`/`lon` from the form if they are sent, otherwise the EXIF GPS of the photo. The coordinates are turned into a street with Nominatim (OpenStreetMap) reverse geocoding. Only points inside Chernivtsi are looked up.
+2. **Locate the photo.** It uses `lat`/`lon` from the form if they are sent, otherwise the EXIF GPS of the photo. The coordinates are turned into a street with Nominatim (OpenStreetMap) reverse geocoding. Only points inside Chernivtsi are looked up. All Nominatim calls (reverse and search) share one in-memory cache and one limit of 1 request per second, with the `RoadLedger/0.1` User-Agent.
 3. **Match repair contracts.** It finds the repair contracts for that street in `data/contracts.json` (public Prozorro data). The match is by normalized street name, and initials match full first names. `data/street_aliases.json` covers streets that were renamed or that are spelled in a different grammatical case in the contract. Every alias has an OpenStreetMap source.
-4. **Give a warranty verdict.** Possible verdicts: `active`, `expired`, `unknown`, `no_contracts`, `no_location`. Each comes with a Ukrainian headline. Warranty end dates are estimates computed from the contract period, not from the works acceptance act.
+4. **Give a warranty verdict.** Possible verdicts: `active`, `expired`, `unknown`, `no_contracts`, `no_location`. Each comes with a Ukrainian title and headline. The API points to a *possible* warranty case to check; it does not establish the contractor's liability. Warranty end dates are estimates computed from the contract period, not from the works acceptance act.
 
 ## Endpoints
 
@@ -13,6 +13,8 @@ FastAPI service behind the Road Ledger app. You send it a photo of a road. It do
 |---|---|---|
 | `POST` | `/analyze` | multipart form: `image` (required), `lat` + `lon` (optional, passed together). Returns detections, location, street, matched contracts (with `verdict`, `warranty_confidence`, `matched_alias`) and `summary`. |
 | `GET` | `/contracts` | the full contract ledger (`data/contracts.json`) |
+| `GET` | `/geocode/reverse?lat=&lon=` | nearest street for the map screen: `{street, in_city}`. Same lookup as `/analyze`. |
+| `GET` | `/geocode/search?q=` | streets and addresses inside Chernivtsi (Nominatim search bounded to the city box), one row per street and district: `{results: [{name, place, lat, lon}]}`. Queries shorter than 3 characters return nothing. |
 | `GET` | `/health` | status, inference device, number of contracts |
 
 Interactive docs: `http://127.0.0.1:8000/docs`.
