@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { analyze, ApiError } from './api'
 import { coordsWithin, geocodeLabel, geoLabel, locate, PICK_WAIT_MS, type GeoStatus } from './geo'
 import { mockAnalyze, mockKind } from './mock'
@@ -7,7 +8,7 @@ import type { AppealInput } from './appeal'
 import { nextScreen, sendsPhonePosition, type PhotoSource } from './flow'
 import type { AnalyzeResponse, Coords, ErrorKind, GeocodeInfo, LocSource } from './types'
 import Home from './screens/Home'
-import Analysis from './screens/Analysis'
+import Analysis, { phaseHoldMs, type AnalysisPhase } from './screens/Analysis'
 import Result from './screens/Result'
 import ErrorScreen from './screens/ErrorScreen'
 import HowItWorks from './screens/HowItWorks'
@@ -16,13 +17,14 @@ import Appeal from './screens/Appeal'
 
 type Screen =
   | { name: 'home' }
-  | { name: 'analysis'; photoUrl: string }
+  | { name: 'analysis'; photoUrl: string; phase: AnalysisPhase }
   | { name: 'result'; photoUrl: string; data: AnalyzeResponse; locSource: LocSource }
   | { name: 'error'; kind: ErrorKind }
   | { name: 'locate'; start: Coords; noPhotoGps: boolean }
   | { name: 'appeal'; appeal: Omit<AppealInput, 'name' | 'contact'> }
   | { name: 'how' }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const MOCK = mockKind()
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1'
 
@@ -73,13 +75,34 @@ export default function App() {
     window.scrollTo(0, 0)
   }
 
+  /** The analysis screen plays its done / failed sequence, then the next screen replaces it. */
+  async function finish(id: number, photoUrl: string, phase: 'done' | 'failed') {
+    replace({ name: 'analysis', photoUrl, phase })
+    await sleep(phaseHoldMs(phase))
+    return id === run.current
+  }
+
+  /**
+   * Analysis → result: the photo moves from one frame to the other (View Transitions, Safari 18+).
+   * Without the API, or with reduced motion, the result replaces the screen with the usual fade.
+   */
+  async function morphTo(s: Screen, photoUrl: string) {
+    const vt = (document as Document & { startViewTransition?: (cb: () => void) => unknown }).startViewTransition
+    if (!vt || matchMedia('(prefers-reduced-motion: reduce)').matches) return replace(s)
+    // decoded first, so the new snapshot has the photo and not its skeleton
+    const img = new Image()
+    img.src = photoUrl
+    await img.decode().catch(() => {})
+    vt.call(document, () => flushSync(() => replace(s)))
+  }
+
   /** The on-screen back arrow does what the browser's «Back» does. */
   const back = () => (at.current > 0 ? history.back() : home())
 
   async function start(file: File, photoUrl: string, source: PhotoSource, coordsP: Promise<Coords | null>, how: 'push' | 'replace') {
     const id = ++run.current
     last.current = { file, photoUrl, source, coords: coordsP }
-    ;(how === 'push' ? push : replace)({ name: 'analysis', photoUrl })
+    ;(how === 'push' ? push : replace)({ name: 'analysis', photoUrl, phase: 'waiting' })
     try {
       // a point picked on the map always goes to the real API, also in mock mode
       let data: AnalyzeResponse
@@ -96,8 +119,8 @@ export default function App() {
         data = await analyze(file, coords)
       }
       setGeocode(data.geocode ?? null)
-      // the result shows as soon as the answer arrives: no step-by-step replay
-      if (id !== run.current) return
+      // the server has done all three steps: they finish together (~0.8 s), then the result
+      if (id !== run.current || !(await finish(id, photoUrl, 'done'))) return
       const next = nextScreen(source, data)
       if (next.screen === 'locate') {
         // a gallery photo wasn't sent with the phone position, but it is still the best place to start the map
@@ -105,10 +128,10 @@ export default function App() {
         if (id !== run.current) return
         replace({ name: 'locate', start: phone ?? CHERNIVTSI_CENTER, noPhotoGps: next.noPhotoGps })
       } else {
-        replace({ name: 'result', photoUrl, data, locSource: next.locSource })
+        await morphTo({ name: 'result', photoUrl, data, locSource: next.locSource }, photoUrl)
       }
     } catch (e) {
-      if (id !== run.current) return
+      if (id !== run.current || !(await finish(id, photoUrl, 'failed'))) return
       replace({ name: 'error', kind: e instanceof ApiError ? e.kind : 'server' })
     }
   }
@@ -181,7 +204,7 @@ export default function App() {
       )}
       {screen.name === 'home' && <Home onStart={onStart} onPick={onPick} onHow={() => push({ name: 'how' })} />}
       {screen.name === 'how' && <HowItWorks onBack={back} />}
-      {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} />}
+      {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} phase={screen.phase} />}
       {screen.name === 'result' && (
         <Result
           photoUrl={screen.photoUrl}

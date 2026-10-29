@@ -56,6 +56,7 @@ export default function Result({ photoUrl, data, locSource, onBack, onChangeStre
       <Header title="Результат" onBack={onBack} />
 
       <PhotoWithBoxes photoUrl={photoUrl} data={data} />
+      <div className="reveal-row">
       {hasDefects ? (
         <p className="caption">{defectsFound(data.detections)} · {LOC_TEXT[locSource]}</p>
       ) : (
@@ -91,8 +92,9 @@ export default function Result({ photoUrl, data, locSource, onBack, onChangeStre
           ))}
         </fieldset>
       )}
+      </div>
 
-      <section className="block">
+      <section className="block reveal-row" style={{ '--r': 1 } as React.CSSProperties}>
         <h2 className="label">Вулиця</h2>
         <p className="street">{data.street?.name ?? 'Не вдалося визначити'}</p>
         {renamed && <p className="secondary">раніше — {oldName(renamed.evidence)}</p>}
@@ -150,12 +152,19 @@ function oldName(evidence: string) {
 }
 
 function PhotoWithBoxes({ photoUrl, data }: { photoUrl: string; data: AnalyzeResponse }) {
-  const [loaded, setLoaded] = useState(false)
+  // from the analysis screen the photo is already decoded: no skeleton, no fade, so the shared transition has it
+  const [cached] = useState(() => {
+    const img = new Image()
+    img.src = photoUrl
+    return img.complete
+  })
+  const [loaded, setLoaded] = useState(cached)
   const { width, height } = data.image_size
   return (
     <div className="photo-frame" style={{ aspectRatio: `${width} / ${height}` }}>
+      {/* not hidden while loading: the photo is already decoded when it arrives from the analysis screen */}
       {!loaded && <div className="skeleton skeleton-fill" />}
-      <img className="photo" src={photoUrl} alt="Фото дороги" onLoad={() => setLoaded(true)} hidden={!loaded} />
+      <img className={`photo photo-shared${cached ? ' photo-cached' : ''}`} src={photoUrl} alt="Фото дороги" onLoad={() => setLoaded(true)} />
       {loaded &&
         data.detections.map((d, i) => {
           const [x1, y1, x2, y2] = d.box

@@ -134,11 +134,58 @@ a:focus-visible, .choice:has(input:focus-visible) {
   display: flex; align-items: center; gap: 12px;
   min-height: 56px; border-bottom: 1px solid var(--line); font-weight: 600;
 }
-.step-mark { width: 18px; height: 18px; flex: 0 0 18px; display: grid; place-items: center; }
-.step-active { color: var(--text); }
-.step-active .step-mark::before { content: ''; width: 8px; height: 8px; background: var(--text); }
+/* text: waiting muted → active bold → done regular; the colour follows the icon */
 .step-pending { color: var(--muted); }
-.step-done { color: var(--text); }
+.step-active { color: var(--text); font-weight: 600; }
+.step-done, .step-failed { color: var(--text); font-weight: 500; }
+.step-done { transition: color 150ms ease calc(var(--i) * 80ms + 250ms); }
+
+/* icon: track circle, arc, and a badge (disc + check or cross) on top */
+.step-icon { position: relative; width: 20px; height: 20px; flex: 0 0 20px; }
+.step-icon svg { position: absolute; inset: 0; display: block; overflow: visible; }
+.step-ring { transform: rotate(-90deg); } /* the arc starts at 12 o'clock */
+.step-track { fill: none; stroke: var(--field); stroke-width: 1.5; }
+.step-arc {
+  fill: none; stroke: var(--text); stroke-width: 2;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+}
+.step-disc { fill: var(--text); opacity: 0; }
+.step-check, .step-cross {
+  fill: none; stroke-width: 2; stroke-dasharray: 1; stroke-dashoffset: 1;
+}
+.step-check { stroke: #fff; }
+.step-cross { stroke: var(--bad); }
+
+/* active: a quarter arc turning at a constant speed (the one linear motion in the app) */
+.step-active .step-arc { stroke-dashoffset: 75; }
+.step-first .step-ring { animation: spin 900ms linear infinite; }
+/* done or failed: the turn stops where it is, so the arc completes from there without a jump */
+.step-first:not(.step-active) .step-ring { animation-play-state: paused; }
+@keyframes spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+
+/* done: the arc closes (250), the disc fills, the check draws (200); steps 80 ms apart */
+.step-done .step-arc {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 250ms var(--ease-out) calc(var(--i) * 80ms);
+}
+.step-done .step-disc {
+  opacity: 1;
+  transition: opacity 150ms var(--ease-out) calc(var(--i) * 80ms + 200ms);
+}
+.step-done .step-check {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 200ms var(--ease-out) calc(var(--i) * 80ms + 250ms);
+}
+
+/* failed: the turning arc stops, closes in red, a red cross draws inside */
+.step-failed .step-arc {
+  stroke: var(--bad); stroke-dashoffset: 0;
+  transition: stroke-dashoffset 200ms var(--ease-out), stroke 150ms ease;
+}
+.step-failed .step-cross {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 200ms var(--ease-out) 100ms;
+}
 
 /* result */
 .block { margin-top: 32px; }
@@ -302,16 +349,25 @@ button, a, label.btn, .choice {
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes drop-in { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes box-in { from { opacity: 0; transform: scale(0.96); } }
-@keyframes pulse { to { opacity: 0.35; } }
+@keyframes rise-in-sm { from { opacity: 0; transform: translateY(4px); } }
+@keyframes icon-in { from { opacity: 0; transform: scale(0.6); } }
 
-/* waiting for the server: the active step breathes, nothing pretends to progress */
-.step-active .step-mark::before { animation: pulse 900ms ease-in-out infinite alternate; }
 /* the photo replaces its skeleton */
 .photo { animation: fade-in 200ms var(--ease-out); }
+.photo-cached { animation: none; }
+
+/* analysis → result: the photo moves between the two frames; the rest crossfades quickly */
+.photo-shared { view-transition-name: photo; }
+::view-transition-group(photo) { animation-duration: 300ms; animation-timing-function: var(--ease-out); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 150ms; }
+
+/* result reveal, under ~1 s: photo settles (300), boxes one by one, the two rows, the verdict last */
 /* defect boxes one by one, after the photo */
-.box { animation: box-in 200ms var(--ease-out) calc(var(--i, 0) * 60ms) both; }
-/* the verdict comes in as the conclusion, without waiting for the photo */
-.verdict { animation: rise-in 250ms var(--ease-out) 150ms both; }
+.box { animation: box-in 200ms var(--ease-out) calc(300ms + var(--i, 0) * 80ms) both; }
+.reveal-row { animation: rise-in-sm 200ms var(--ease-out) calc(150ms + var(--r, 0) * 60ms) both; }
+.verdict { animation: fade-in 200ms var(--ease-out) 400ms both; }
+.verdict-square { animation: icon-in 250ms var(--ease-out) 450ms both; }
+.verdict-title, .verdict-text { animation: rise-in 250ms var(--ease-out) 450ms both; }
 .choices { animation: drop-in 150ms var(--ease-out); }
 .btn-label { display: inline-flex; align-items: center; gap: 8px; animation: fade-in 150ms var(--ease-out); }
 
