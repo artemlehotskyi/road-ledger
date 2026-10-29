@@ -7,7 +7,7 @@ type Stats = { total: number; active: number } | 'loading' | 'error'
 
 interface Props {
   onStart: () => void // tap on «Сфотографувати» / «Обрати з галереї», before the picker opens
-  onPick: (file: File) => void
+  onPick: (file: File, source: 'camera' | 'gallery') => void
   onHow: () => void
 }
 
@@ -23,10 +23,10 @@ export default function Home({ onStart, onPick, onHow }: Props) {
       .catch(() => setStats('error'))
   }, [])
 
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onChange = (source: 'camera' | 'gallery') => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = '' // the same photo can be picked again
-    if (file) onPick(file)
+    if (file) onPick(file, source)
   }
 
   const value = (n: 'total' | 'active') =>
@@ -56,11 +56,11 @@ export default function Home({ onStart, onPick, onHow }: Props) {
       </section>
       <div className="actions">
         <label className="btn btn-primary">
-          <input className="visually-hidden" type="file" accept="image/*" capture="environment" onClick={onStart} onChange={onChange} />
+          <input className="visually-hidden" type="file" accept="image/*" capture="environment" onClick={onStart} onChange={onChange('camera')} />
           Сфотографувати
         </label>
         <label className="btn btn-secondary">
-          <input className="visually-hidden" type="file" accept="image/*" onClick={onStart} onChange={onChange} />
+          <input className="visually-hidden" type="file" accept="image/*" onClick={onStart} onChange={onChange('gallery')} />
           Обрати з галереї
         </label>
       </div>

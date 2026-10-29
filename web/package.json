@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "leaflet": "^1.9.4",

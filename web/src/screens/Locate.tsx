@@ -22,11 +22,12 @@ type Search = { state: 'idle' } | { state: 'loading' } | { state: 'done'; result
 interface Props {
   start: Coords
   geoDenied: boolean
+  noPhotoGps: boolean // gallery photo without EXIF GPS
   onBack: () => void
   onConfirm: (coords: Coords) => void
 }
 
-export default function Locate({ start, geoDenied, onBack, onConfirm }: Props) {
+export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm }: Props) {
   const mapEl = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const [center, setCenter] = useState(start)
@@ -123,6 +124,7 @@ export default function Locate({ start, geoDenied, onBack, onConfirm }: Props) {
     <main className="page page-locate">
       <Header title="Місце дефекту" onBack={onBack} />
       <h2 className="title-l">Де зроблено фото?</h2>
+      {noPhotoGps && <p className="lead lead-strong">У фото немає геолокації. Вкажіть, де його зроблено</p>}
       <p className="lead">Посуньте карту так, щоб точка стала на місце дефекту, або знайдіть вулицю</p>
       {geoDenied && (
         <p className="caption">
