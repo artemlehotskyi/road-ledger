@@ -4,10 +4,12 @@ Run: cd api && .venv/bin/pytest -q
 Nominatim is replaced with reverse-geocode answers recorded on 2026-10-28 (coordinates of the OSM ways).
 RUN_LIVE=1 also checks the same points against the real Nominatim.
 """
+import datetime as dt
 import io
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -352,6 +354,51 @@ def test_access_log_drops_query_string():
                                ("127.0.0.1:5000", "GET", "/geocode/reverse?lat=48.29&lon=25.93", "1.1", 200), None)
     assert main.DropQueryString().filter(record)
     assert "48.29" not in record.getMessage() and "/geocode/reverse" in record.getMessage()
+
+
+# --- manual check of signed-contract scans ------------------------------------------
+
+MANUAL = [c for c in CONTRACTS if c["warranty_source"] == "signed_contract_scan_manual"]
+
+
+def test_manual_checks_are_high_with_page_and_scan():
+    assert len(MANUAL) == 9
+    for c in MANUAL:
+        assert main.warranty_confidence(c) == "high"
+        assert re.fullmatch(r"перевірено вручну за сканом підписаного договору, п\. [\d.]+, с\. \d+", c["warranty_quote_note"])
+        assert c["source_url"].startswith(("https://public-api.prozorro.gov.ua/", "https://public-docs.prozorro.gov.ua/"))
+        assert c["warranty_draft"] is not None and c["warranty_draft"]["source_url"] != c["source_url"]
+
+
+def test_manual_check_keeps_draft_values_for_history():
+    by_id = {c["contract_id"]: c for c in MANUAL}
+    slobidska = by_id["UA-2025-06-23-012109-a-c1"]
+    assert slobidska["warranty_draft"]["warranty_source"] == "contract_attachment"
+    assert slobidska["warranty_draft"]["warranty_months"] == slobidska["warranty_months"] == 120
+
+
+def test_heroiv_krut_warranty_found_on_scan():
+    # № 59: no warranty in any text document; 120 months from acceptance on the signed scan (п. 2.5, с. 2)
+    c = next(c for c in CONTRACTS if c["contract_id"] == "UA-2023-03-08-004170-a-a1")
+    assert c["warranty_months"] == 120 and c["scope"] == "street"
+    assert c["warranty_until"] == "2033-12-31"  # period.endDate 2023-12-31, the contract has no `date`
+    assert c["warranty_draft"]["warranty_source"] == "none" and c["warranty_draft"]["warranty_months"] is None
+    assert c["warranty_quote_note"].endswith("п. 2.5, с. 2")
+
+
+@pytest.mark.parametrize("text, months", [("10 років", 120), ("три роки", 36), ("один рік", 12), ("36 міс.", 36)])
+def test_months_from_text(text, months):
+    assert build_ledger.months_from_text(text) == months
+
+
+def test_estimate_until_rule():
+    later_close = {"period": {"endDate": "2025-12-31T00:00:00+02:00"}, "date": "2026-01-13T10:00:00+02:00"}
+    assert build_ledger.estimate_until(later_close, 120) == "2036-01-13"
+    earlier_close = {"period": {"endDate": "2026-12-31T00:00:00+02:00"}, "date": "2025-12-24T10:00:00+02:00"}
+    assert build_ledger.estimate_until(earlier_close, 36) == "2029-12-31"
+    no_date = {"period": {"endDate": "2023-12-31T00:00:00+02:00"}}
+    assert build_ledger.estimate_until(no_date, 120) == "2033-12-31"
+    assert build_ledger.add_months(dt.date(2024, 1, 31), 1) == dt.date(2024, 2, 29)
 
 
 # --- local street index (data/streets_cv.json) -----------------------------------

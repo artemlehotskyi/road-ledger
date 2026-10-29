@@ -105,7 +105,7 @@ function summarize(street: Scenario['street'], contracts: Contract[], detections
     `Гарантія підрядника ${c.contractor}${terms} закінчилась орієнтовно ${fmtDate(c.warranty_until!)}.` }
 }
 
-const CONFIDENCE = { signed_contract: 'high', contract_attachment: 'medium', tender_draft: 'medium' } as const
+const CONFIDENCE = { signed_contract: 'high', signed_contract_scan_manual: 'high', contract_attachment: 'medium', tender_draft: 'medium' } as const
 
 export async function mockAnalyze(kind: MockKind, photoUrl: string): Promise<AnalyzeResponse> {
   const [{ default: ledger }, { default: aliasFile }, size] = await Promise.all([

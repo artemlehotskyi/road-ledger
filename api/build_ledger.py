@@ -1,8 +1,10 @@
 """Build api/data/contracts.json from _import/road_ledger_verified.xlsx (sheet «Договори»)
-plus the cached Prozorro JSON in _import/prozorro/<tender id>/ (tender.json, contract.json).
+plus the cached Prozorro JSON in _import/prozorro/<tender id>/ (tender.json, contract.json)
+and the manual check of signed-contract scans, _import/manual_check_orest_filled.xlsx (sheet «Перевірка»).
 
 Usage: python api/build_ledger.py [path/to/road_ledger_verified.xlsx]
 """
+import calendar
 import datetime as dt
 import json
 import re
@@ -16,6 +18,7 @@ from streets import street_keys, locality
 ROOT = Path(__file__).resolve().parent.parent
 XLSX = ROOT / "_import" / "road_ledger_verified.xlsx"
 PROZORRO_DIR = ROOT / "_import" / "prozorro"
+MANUAL_XLSX = ROOT / "_import" / "manual_check_orest_filled.xlsx"
 OUT = Path(__file__).resolve().parent / "data" / "contracts.json"
 CONTRACT_API = "https://public-api.prozorro.gov.ua/api/2.5/contracts/"
 SHEET = "Договори"
@@ -136,11 +139,81 @@ def prozorro(tid, name):
     return data.get("data", data)
 
 
+# «10 років», «три роки», «один рік», «36 міс.»
+_NUMBER_WORDS = {"один": 1, "одного": 1, "два": 2, "три": 3, "чотири": 4, "п'ять": 5, "п’ять": 5, "десять": 10}
+
+
+def months_from_text(text):
+    m = re.match(r"\s*(\d+|[^\W\d]+[’']?[^\W\d]*)\s+(рік|роки|років|міс)", (text or "").lower())
+    if not m:
+        raise SystemExit(f"cannot read a warranty term from «{text}»")
+    n = int(m.group(1)) if m.group(1).isdigit() else _NUMBER_WORDS[m.group(1)]
+    return n if m.group(2) == "міс" else n * 12
+
+
+def add_months(day, months):
+    y, mo = divmod(day.month - 1 + months, 12)
+    y, mo = day.year + y, mo + 1
+    return dt.date(y, mo, min(day.day, calendar.monthrange(y, mo)[1]))
+
+
+def estimate_until(contract, months):
+    """Same rule as warranty_until_estimate in the xlsx (holds for all 28 contracts with a warranty there):
+    months after the later of period.endDate and contract.date (the date the contract was closed);
+    older contracts have no `date`, then period.endDate alone."""
+    start = dt.date.fromisoformat(contract["period"]["endDate"][:10])
+    if contract.get("date"):
+        start = max(start, dt.date.fromisoformat(contract["date"][:10]))
+    return add_months(start, months).isoformat()
+
+
+def manual_checks(path):
+    """{tender id: check} for the rows where the warranty term in the signed contract was filled in by hand."""
+    if not path.exists():
+        return {}
+    ws = openpyxl.load_workbook(path)["Перевірка"]  # not read-only: hyperlinks to the scans are needed
+    header = [c.value for c in ws[1]]
+    col = {name: i for i, name in enumerate(header)}
+    checks = {}
+    for cells in ws.iter_rows(min_row=2):
+        get = lambda name: cells[col[name]].value
+        term = get("ОРЕСТ: строк гарантії в підписаному договорі")
+        if not term:
+            continue
+        clause = re.search(r"п\.\s*[\d.]*\d", get("ОРЕСТ: коментар") or "")
+        scan = cells[col["Скан підписаного договору"]].hyperlink
+        if not clause or not scan or not get("ОРЕСТ: номер сторінки скану"):
+            raise SystemExit(f"manual check for {get('Тендер (посилання)')}: clause, page or scan link missing")
+        checks[get("Тендер (посилання)")] = {
+            "months": months_from_text(term),
+            "clause": clause.group(0),
+            "page": get("ОРЕСТ: номер сторінки скану"),
+            "basis": get("ОРЕСТ: від чого рахується (прийняття робіт / інше)"),
+            "scan_url": scan.target,
+        }
+    return checks
+
+
+def apply_manual_check(record, check, contract):
+    """Signed contract verified by hand on its scan: high confidence. The previous values stay in warranty_draft."""
+    record["warranty_draft"] = {k: record[k] for k in
+                                ("warranty_months", "warranty_until", "warranty_source", "warranty_quote", "source_url")}
+    record.update({
+        "warranty_months": check["months"],
+        "warranty_until": estimate_until(contract, check["months"]),
+        "warranty_source": "signed_contract_scan_manual",
+        "warranty_quote_note": f"перевірено вручну за сканом підписаного договору, {check['clause']}, с. {check['page']}",
+        "warranty_start_basis": check["basis"],
+        "source_url": check["scan_url"],
+    })
+
+
 def build(xlsx_path):
     wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     rows = list(wb[SHEET].iter_rows(values_only=True))
     h = find_header(rows)
     header = rows[h]
+    manual = manual_checks(MANUAL_XLSX)
     contracts = []
     for values in rows[h + 1:]:
         row = dict(zip(header, values))
@@ -157,7 +230,7 @@ def build(xlsx_path):
         contract = prozorro(tid, "contract.json")
         if contract["contractID"] != row["Номер договору"]:
             raise SystemExit(f"contract.json is for {contract['contractID']}, not {row['Номер договору']}")
-        contracts.append({
+        record = {
             "id": tid,
             "contract_id": row["Номер договору"],
             "street": street,
@@ -181,9 +254,17 @@ def build(xlsx_path):
             "status_check": row["status_check"],
             "warranty_quote": row["warranty_quote"],
             "source_url": row["warranty_source_url"],
+            "warranty_quote_note": None,
+            "warranty_start_basis": None,
+            "warranty_draft": None,
             "tender_url": f"https://prozorro.gov.ua/tender/{tid}",
             "procurement_method": row["procurement_method"],
-        })
+        }
+        if tid in manual:
+            apply_manual_check(record, manual.pop(tid), contract)
+        contracts.append(record)
+    if manual:
+        raise SystemExit(f"manual checks for tenders not in the ledger: {sorted(manual)}")
     return contracts
 
 

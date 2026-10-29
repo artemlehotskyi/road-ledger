@@ -5,7 +5,7 @@ import { plural } from '../format'
 import type { LedgerContract } from '../types'
 import Header from './Header'
 
-type Coverage = { total: number; found: number; noDocs: number; signed: number; draft: number; territory: number }
+type Coverage = { total: number; found: number; noDocs: number; signed: number; manual: number; draft: number; territory: number }
 
 function coverage(all: LedgerContract[]): Coverage {
   const list = all.filter((c) => c.scope === 'street')
@@ -15,6 +15,7 @@ function coverage(all: LedgerContract[]): Coverage {
     found: list.filter((c) => c.warranty_months !== null).length,
     noDocs: list.filter((c) => c.status_check === 'no_docs').length,
     signed: list.filter((c) => c.warranty_source === 'signed_contract').length,
+    manual: list.filter((c) => c.warranty_source === 'signed_contract_scan_manual').length,
     draft: list.filter((c) => c.warranty_source === 'tender_draft' || c.warranty_source === 'contract_attachment').length,
   }
 }
@@ -50,7 +51,7 @@ export default function HowItWorks({ onBack }: { onBack: () => void }) {
   }, [])
 
   // same states as the numbers on the home screen
-  const count = (k: 'signed' | 'draft') =>
+  const count = (k: 'signed' | 'manual' | 'draft') =>
     cov === 'loading' ? <span className="skeleton skeleton-num" aria-label="Завантаження" /> :
     cov === 'error' ? <span className="muted">немає даних</span> : cov[k]
 
@@ -114,12 +115,17 @@ export default function HowItWorks({ onBack }: { onBack: () => void }) {
         <h2 className="section-title">Як рахуємо гарантію</h2>
         <p className="prose">
           Строк гарантії береться з тексту договору або проєкту договору в тендерній документації, з дослівною цитатою.
+          Якщо підписаний договір опубліковано лише сканом, строк перевіряємо вручну і вказуємо пункт і сторінку скану.
           Дата «орієнтовно до» рахується від завершення договору, а не від акта приймання робіт.
         </p>
         <dl className="rows rows-stat">
           <div className="row">
-            <dt>Підписаний договір</dt>
+            <dt>Текст підписаного договору</dt>
             <dd className="num">{count('signed')}</dd>
+          </div>
+          <div className="row">
+            <dt>Скан підписаного договору, перевірено вручну</dt>
+            <dd className="num">{count('manual')}</dd>
           </div>
           <div className="row">
             <dt>Проєкт договору — потребує перевірки</dt>

@@ -237,6 +237,7 @@ def alias_info(alias):
 
 WARRANTY_CONFIDENCE = {
     "signed_contract": "high",       # text of the signed contract
+    "signed_contract_scan_manual": "high",  # signed contract is a scan, term checked by hand (page and clause noted)
     "contract_attachment": "medium",  # draft-contract form uploaded to the contract
     "tender_draft": "medium",         # draft contract in the tender documentation
 }

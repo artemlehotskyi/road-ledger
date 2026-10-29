@@ -36,7 +36,11 @@ export interface LedgerContract {
   contract_url: string
   warranty_months: number | null
   warranty_until: string | null
-  warranty_source: 'signed_contract' | 'contract_attachment' | 'tender_draft' | 'none'
+  // signed_contract_scan_manual: the signed contract is a scan; the term was checked by hand (warranty_quote_note)
+  warranty_source: 'signed_contract' | 'signed_contract_scan_manual' | 'contract_attachment' | 'tender_draft' | 'none'
+  warranty_quote_note: string | null // «перевірено вручну за сканом підписаного договору, п. 2.5, с. 2»
+  warranty_start_basis: string | null
+  warranty_draft: { warranty_months: number | null; warranty_until: string | null; warranty_source: string } | null // before the manual check
   status_check: string
   warranty_quote: string | null
   source_url: string | null

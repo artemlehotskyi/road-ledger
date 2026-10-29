@@ -12,9 +12,11 @@ const LOC_TEXT: Record<LocSource, string> = {
 
 const NO_DEFECTS_PREFIX = 'Дефектів не виявлено. '
 
-const CONFIDENCE_TEXT = {
-  high: 'Підтверджено текстом підписаного договору',
-  medium: 'Гарантія лише за проєктом договору',
+/** Under the verdict: how the warranty term is known. */
+function confidenceText(c: Contract) {
+  if (c.warranty_source === 'signed_contract_scan_manual') return 'Підтверджено підписаним договором (перевірено вручну)'
+  if (c.warranty_confidence === 'high') return 'Підтверджено текстом підписаного договору'
+  return 'Гарантія лише за проєктом договору'
 }
 
 const COVERAGE = 'База охоплює договори Департаменту інфраструктури та благоустрою за 2023–2026 роки'
@@ -109,9 +111,7 @@ export default function Result({ photoUrl, data, locSource, onBack, onChangeStre
           </p>
         )}
         {dated && <p className="verdict-note">{DATE_NOTE}</p>}
-        {dated && main?.warranty_confidence && (
-          <p className="verdict-confidence">{CONFIDENCE_TEXT[main.warranty_confidence]}</p>
-        )}
+        {dated && main?.warranty_confidence && <p className="verdict-confidence">{confidenceText(main)}</p>}
       </section>
 
       {verdict === 'active' && main && (
@@ -184,6 +184,9 @@ function PhotoWithBoxes({ photoUrl, data }: { photoUrl: string; data: AnalyzeRes
 
 function ContractBlock({ contract: c, index, total }: { contract: Contract; index: number; total: number }) {
   const draft = c.warranty_source === 'tender_draft' || c.warranty_source === 'contract_attachment'
+  const manual = c.warranty_source === 'signed_contract_scan_manual'
+  // after a manual check the quote is still the draft text, which the signed scan repeats
+  const quoteLabel = manual ? 'З проєкту договору (у підписаному — так само)' : draft ? 'З проєкту договору' : 'З тексту договору'
   return (
     <section className="block">
       <h2 className="section-title">
@@ -201,10 +204,11 @@ function ContractBlock({ contract: c, index, total }: { contract: Contract; inde
 
       {c.warranty_quote && (
         <>
-          <h3 className="label">{draft ? 'З проєкту договору' : 'З тексту договору'}</h3>
+          <h3 className="label">{quoteLabel}</h3>
           <blockquote className="quote">«{c.warranty_quote}»</blockquote>
         </>
       )}
+      {c.warranty_quote_note && <p className="caption">{c.warranty_quote_note[0].toUpperCase() + c.warranty_quote_note.slice(1)}</p>}
 
       <ul className="links">
         <li>
@@ -215,7 +219,8 @@ function ContractBlock({ contract: c, index, total }: { contract: Contract; inde
         {c.source_url && (
           <li>
             <a href={c.source_url} target="_blank" rel="noopener noreferrer">
-              {c.warranty_source === 'tender_draft' ? 'Тендерна документація на Prozorro' : 'Документ договору на Prozorro'}{' '}
+              {c.warranty_source === 'tender_draft' ? 'Тендерна документація на Prozorro'
+                : manual ? 'Скан підписаного договору на Prozorro' : 'Документ договору на Prozorro'}{' '}
               <ExternalArrow />
             </a>
           </li>
