@@ -33,3 +33,7 @@ test('camera without any position: the map, without the gallery note', () => {
 test('point from the map', () => {
   assert.deepEqual(nextScreen('map', { summary: summary('expired'), location: at('manual') }), { screen: 'result', locSource: 'map' })
 })
+
+test('outside the checked area: the result with its own panel, not the map straight away', () => {
+  assert.deepEqual(nextScreen('camera', { summary: summary('outside'), location: at('manual') }), { screen: 'result', locSource: 'device' })
+})

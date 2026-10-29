@@ -210,6 +210,9 @@ export default function App() {
           photoUrl={screen.photoUrl}
           data={screen.data}
           locSource={screen.locSource}
+          accuracy={screen.locSource === 'device' && geo.state === 'ok' ? geo.accuracy : null}
+          onRetake={(file) => onPick(file, 'camera')}
+          onRetakeStart={onStart}
           onBack={home}
           onChangeStreet={() => changePlace(screen.data.location)}
           onAppeal={(contract, defect) =>

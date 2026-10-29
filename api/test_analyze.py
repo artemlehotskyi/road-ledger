@@ -319,7 +319,9 @@ def test_outside_chernivtsi_skips_geocoding(client, monkeypatch):
         raise AssertionError("Nominatim must not be called outside the bbox")
     monkeypatch.setattr(main, "reverse_geocode", fail)
     body = analyze(client, jpeg(), lat=50.4501, lon=30.5234).json()  # Kyiv
-    assert body["summary"]["verdict"] == "no_contracts"
+    assert body["summary"]["verdict"] == "outside"
+    assert body["summary"]["title"] == "Точка поза зоною перевірки"
+    assert body["summary"]["headline"].endswith("Вкажіть місце дефекту на карті.")
     assert body["street"] is None
 
 
@@ -496,7 +498,7 @@ def test_nominatim_error_is_reported_without_coordinates(client, monkeypatch):
     monkeypatch.setattr(main, "reverse_geocode", fail)
     body = analyze(client, jpeg(), lat=FAR_FROM_STREETS[0], lon=FAR_FROM_STREETS[1]).json()
     assert body["geocode"] == {"status": "error", "source": "nominatim", "distance_m": 155, "detail": "HTTP 429"}
-    assert body["summary"]["verdict"] == "no_contracts"
+    assert body["summary"]["verdict"] == "outside"
 
 
 def test_analyze_uses_local_index(client, no_nominatim):
@@ -529,3 +531,11 @@ def test_real_photo_detections(client, offline):
 def test_live_nominatim_agrees_with_recording(point):
     main.state.setdefault("http", main.httpx.Client(headers={"User-Agent": main.USER_AGENT}, timeout=10))
     assert main.reverse_geocode(*point)["address"]["road"] == RECORDED[point]
+
+
+def test_no_street_within_60_m_is_outside_not_no_repairs(client, monkeypatch):
+    """Over 60 m from any street the point is outside what we check: «no repairs» would be untrue."""
+    monkeypatch.setattr(main, "reverse_geocode", lambda lat, lon: {"address": {}})
+    body = analyze(client, jpeg(), lat=FAR_FROM_STREETS[0], lon=FAR_FROM_STREETS[1]).json()
+    assert body["street"] is None
+    assert body["summary"]["verdict"] == "outside"

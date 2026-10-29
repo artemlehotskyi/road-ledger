@@ -276,7 +276,10 @@ VERDICT_TITLE = {
     "unknown": "Недостатньо даних",
     "no_contracts": "Ремонтів у базі немає",
     "no_location": "Немає координат",
+    "outside": "Точка поза зоною перевірки",
 }
+OUTSIDE = ("Ми перевіряємо договори на вулицях Чернівецької громади. Геолокація неточна або фото зроблене "
+           "за межами міста. Вкажіть місце дефекту на карті.")
 COVERAGE = "База охоплює договори Департаменту інфраструктури та благоустрою за 2023–2026 роки."
 
 
@@ -289,10 +292,9 @@ def summarize(location, street, in_city, contracts, detections):
 
     if location is None:
         return out("no_location", "Немає координат: додайте геолокацію, щоб перевірити гарантію.")
-    if not in_city:
-        return out("no_contracts", "Точка поза межами Чернівців.")
-    if street is None:
-        return out("no_contracts", "Не вдалося визначити вулицю за координатами.")
+    # outside the hromada, or no street within 60 m: we can't say there were no repairs
+    if not in_city or street is None:
+        return out("outside", OUTSIDE)
     if not contracts:
         return out("no_contracts", f"На вулиці «{street['name']}» договорів на ремонт у базі немає. {COVERAGE}")
 

@@ -1,12 +1,12 @@
 /**
- * Temporary dev mode: ?mock=active|review|expired|unknown|no_contracts|territory|no_defects|no_location
+ * Temporary dev mode: ?mock=active|review|expired|unknown|no_contracts|territory|no_defects|no_location|outside
  * replaces POST /analyze with a local response. Contracts and aliases are real records
  * from api/data/; detections, coordinates and the street are synthetic.
  */
 import type { AnalyzeResponse, Contract, Detection, LedgerContract, MatchedAlias } from './types'
 import { fmtDate, todayIso, verdictContract } from './format'
 
-export const MOCK_KINDS = ['active', 'review', 'expired', 'unknown', 'no_contracts', 'territory', 'no_defects', 'no_location'] as const
+export const MOCK_KINDS = ['active', 'review', 'expired', 'unknown', 'no_contracts', 'territory', 'no_defects', 'no_location', 'outside'] as const
 export type MockKind = (typeof MOCK_KINDS)[number]
 
 export function mockKind(): MockKind | null {
@@ -22,6 +22,7 @@ interface Scenario {
   contractIds?: string[] // or exactly these contracts
   alias?: string // ledger_key of the street_aliases.json row to attach
   detections: [Detection['class'], number, Box][]
+  outside?: boolean // coordinates without a street: the outside verdict
 }
 
 const SCENARIOS: Record<MockKind, Scenario> = {
@@ -70,14 +71,21 @@ const SCENARIOS: Record<MockKind, Scenario> = {
     detections: [],
   },
   no_location: { street: null, contractIds: [], detections: [] },
+  // a point with coordinates but no street within 60 m (or outside the hromada)
+  outside: { street: null, contractIds: [], detections: [['pothole', 0.771, [0.25, 0.5, 0.65, 0.8]]], outside: true },
 }
 
 const DRAFT_TERMS = ' за умовами проєкту договору'
+const OUTSIDE = 'Ми перевіряємо договори на вулицях Чернівецької громади. Геолокація неточна або фото зроблене ' +
+  'за межами міста. Вкажіть місце дефекту на карті.'
 const COVERAGE = 'База охоплює договори Департаменту інфраструктури та благоустрою за 2023–2026 роки.'
 
 // port of summarize() in api/main.py, for the cases the scenarios hit
-function summarize(street: Scenario['street'], contracts: Contract[], detections: Detection[]): AnalyzeResponse['summary'] {
+function summarize(street: Scenario['street'], contracts: Contract[], detections: Detection[], outside = false): AnalyzeResponse['summary'] {
   const defects = detections.length ? '' : 'Дефектів не виявлено. '
+  if (outside) {
+    return { verdict: 'outside', title: 'Точка поза зоною перевірки', headline: defects + OUTSIDE }
+  }
   if (!street) {
     return { verdict: 'no_location', title: 'Немає координат',
       headline: defects + 'Немає координат: додайте геолокацію, щоб перевірити гарантію.' }
@@ -138,12 +146,13 @@ export async function mockAnalyze(kind: MockKind, photoUrl: string): Promise<Ana
   return {
     detections,
     image_size: size,
-    location: s.street ? { lat: 48.2915, lon: 25.9403, source: 'manual' } : null,
+    location: s.street || s.outside ? { lat: 48.2915, lon: 25.9403, source: 'manual' } : null,
     street: s.street,
-    geocode: s.street ? { status: 'found', source: 'local', distance_m: null, detail: 'mock' } : null,
+    geocode: s.street ? { status: 'found', source: 'local', distance_m: null, detail: 'mock' }
+      : s.outside ? { status: 'none', source: 'local', distance_m: 140, detail: 'mock' } : null,
     contracts,
     other_works: otherWorks,
-    summary: summarize(s.street, contracts, detections),
+    summary: summarize(s.street, contracts, detections, s.outside),
   }
 }
 

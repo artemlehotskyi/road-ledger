@@ -1,5 +1,6 @@
 export type ContractVerdict = 'active' | 'expired' | 'unknown'
-export type SummaryVerdict = ContractVerdict | 'no_contracts' | 'no_location'
+// outside: beyond the hromada or no street within 60 m, so nothing can be said about repairs
+export type SummaryVerdict = ContractVerdict | 'no_contracts' | 'no_location' | 'outside'
 export type DefectClass = 'pothole' | 'crack' | 'patching'
 
 export interface Detection {

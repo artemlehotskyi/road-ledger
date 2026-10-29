@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import { reverseStreet, searchPlaces, type Place } from '../api'
 import { CHERNIVTSI_BOUNDS, OSM_ATTRIBUTION, OSM_TILES } from '../config'
 import type { Coords, GeocodeInfo } from '../types'
+import { PinIcon } from '../icons'
 import Header from './Header'
 
 // wait until the map or the query stops changing; the API keeps Nominatim at 1 request/s on top of this
@@ -187,6 +188,8 @@ export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm
 
       <div className="locate-bar">
         <p className="nearest" aria-live="polite">
+          <PinIcon size={20} />
+          <span>
           {outside ? (
             'Точка поза межами Чернівців'
           ) : (
@@ -201,6 +204,7 @@ export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm
               </strong>
             </>
           )}
+          </span>
         </p>
         <button className="btn btn-primary" onClick={confirm} disabled={moving || outside}>
           Підтвердити місце
