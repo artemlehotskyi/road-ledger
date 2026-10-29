@@ -5,7 +5,13 @@ import Brand from './Brand'
 
 type Stats = { total: number; active: number } | 'loading' | 'error'
 
-export default function Home({ onPick, onHow }: { onPick: (file: File) => void; onHow: () => void }) {
+interface Props {
+  onStart: () => void // tap on «Сфотографувати» / «Обрати з галереї», before the picker opens
+  onPick: (file: File) => void
+  onHow: () => void
+}
+
+export default function Home({ onStart, onPick, onHow }: Props) {
   const [stats, setStats] = useState<Stats>('loading')
 
   useEffect(() => {
@@ -36,7 +42,7 @@ export default function Home({ onPick, onHow }: { onPick: (file: File) => void; 
           Покажемо, хто ремонтував цю ділянку і чи передбачена гарантія підрядника. Якщо гарантія ще діє,
           можна ініціювати перевірку і ремонт за його рахунок.
         </p>
-        <dl className="rows">
+        <dl className="rows rows-stat">
           <div className="row">
             <dt>Договорів на ремонт вулиць</dt>
             <dd className="num">{value('total')}</dd>
@@ -50,11 +56,11 @@ export default function Home({ onPick, onHow }: { onPick: (file: File) => void; 
       </section>
       <div className="actions">
         <label className="btn btn-primary">
-          <input className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={onChange} />
+          <input className="visually-hidden" type="file" accept="image/*" capture="environment" onClick={onStart} onChange={onChange} />
           Сфотографувати
         </label>
         <label className="btn btn-secondary">
-          <input className="visually-hidden" type="file" accept="image/*" onChange={onChange} />
+          <input className="visually-hidden" type="file" accept="image/*" onClick={onStart} onChange={onChange} />
           Обрати з галереї
         </label>
       </div>

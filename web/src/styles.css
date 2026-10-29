@@ -254,3 +254,12 @@ a:focus-visible, .choice:has(input:focus-visible) {
 }
 .leaflet-touch .leaflet-bar, .leaflet-bar { border: 1px solid var(--field); border-radius: var(--radius); box-shadow: none; }
 .leaflet-control-attribution a { color: var(--text); }
+
+/* number rows (home, how it works): label takes the free width, the number sits at the right edge */
+.rows-stat .row dt, .block .rows-stat .row dt {
+  flex: 1 1 0; min-width: 0; font-size: 16px; font-weight: 500; color: var(--text-2);
+}
+.rows-stat .row dd, .block .rows-stat .row dd {
+  flex: 0 0 auto; text-align: right; white-space: nowrap; font-size: 20px; font-weight: 700;
+}
+.dev-badge-geo { top: auto; bottom: 0; }

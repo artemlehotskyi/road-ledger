@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { analyze, ApiError, getPosition } from './api'
+import { analyze, ApiError } from './api'
+import { coordsWithin, geoLabel, locate, PICK_WAIT_MS, type GeoStatus } from './geo'
 import { mockAnalyze, mockKind } from './mock'
 import { CHERNIVTSI_CENTER } from './config'
 import type { AppealInput } from './appeal'
@@ -24,10 +25,13 @@ type Screen =
 const STEP_DELAY_MS = 300
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const MOCK = mockKind()
+const DEBUG = new URLSearchParams(location.search).get('debug') === '1'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' })
   const run = useRef(0)
+  const [geo, setGeo] = useState<GeoStatus>({ state: 'idle' })
+  const geoRef = useRef<{ status: GeoStatus; pending: Promise<GeoStatus> | null }>({ status: { state: 'idle' }, pending: null })
   const last = useRef<{ file: File; photoUrl: string; coords: Promise<Coords | null>; fromMap: boolean } | null>(null)
 
   const show = (s: Screen) => {
@@ -68,9 +72,31 @@ export default function App() {
     }
   }
 
+  function requestGeo() {
+    const g = geoRef.current
+    const onStatus = (s: GeoStatus) => {
+      g.status = s
+      setGeo(s)
+    }
+    g.pending = locate(onStatus)
+    return g.pending
+  }
+
+  // called in the tap that opens the picker: the only moment iOS Safari shows the permission prompt
+  function onStart() {
+    if (geoRef.current.status.state !== 'requested') requestGeo()
+  }
+
+  /** Position for a photo: the request started on the tap, or a new one if that one failed; at most PICK_WAIT_MS. */
+  function photoCoords() {
+    const g = geoRef.current
+    const failed = g.status.state === 'timeout' || g.status.state === 'unavailable' || g.status.state === 'idle'
+    const pending = !g.pending || failed ? requestGeo() : g.pending
+    return coordsWithin(pending, PICK_WAIT_MS)
+  }
+
   function onPick(file: File) {
-    // ask for position right away, inside the user gesture
-    const coords = getPosition()
+    const coords = photoCoords()
     if (last.current) URL.revokeObjectURL(last.current.photoUrl)
     start(file, URL.createObjectURL(file), coords)
   }
@@ -84,7 +110,7 @@ export default function App() {
     const l = last.current
     // the same unreadable file would fail again: pick another one
     if (kind === 'photo' || !l) return home()
-    start(l.file, l.photoUrl, l.fromMap ? l.coords : l.coords.then((c) => c ?? getPosition()), l.fromMap)
+    start(l.file, l.photoUrl, l.fromMap ? l.coords : l.coords.then((c) => c ?? photoCoords()), l.fromMap)
   }
 
   function confirmPlace(coords: Coords) {
@@ -102,7 +128,8 @@ export default function App() {
   return (
     <>
       {MOCK && <div className="dev-badge">dev: mock={MOCK}</div>}
-      {screen.name === 'home' && <Home onPick={onPick} onHow={() => show({ name: 'how' })} />}
+      {DEBUG && <div className="dev-badge dev-badge-geo">геолокація: {geoLabel(geo)}</div>}
+      {screen.name === 'home' && <Home onStart={onStart} onPick={onPick} onHow={() => show({ name: 'how' })} />}
       {screen.name === 'how' && <HowItWorks onBack={home} />}
       {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} step={screen.step} />}
       {screen.name === 'result' && (
@@ -128,7 +155,13 @@ export default function App() {
       )}
       {screen.name === 'error' && <ErrorScreen kind={screen.kind} onRetry={() => retry(screen.kind)} onHome={home} />}
       {screen.name === 'locate' && (
-        <Locate key={`${screen.start.lat},${screen.start.lon}`} start={screen.start} onBack={() => show(screen.back)} onConfirm={confirmPlace} />
+        <Locate
+          key={`${screen.start.lat},${screen.start.lon}`}
+          start={screen.start}
+          geoDenied={geo.state === 'denied'}
+          onBack={() => show(screen.back)}
+          onConfirm={confirmPlace}
+        />
       )}
       {screen.name === 'appeal' && (
         <Appeal appeal={screen.appeal} photo={last.current?.file ?? null} onBack={() => show(screen.back)} />

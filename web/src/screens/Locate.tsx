@@ -21,11 +21,12 @@ type Search = { state: 'idle' } | { state: 'loading' } | { state: 'done'; result
 
 interface Props {
   start: Coords
+  geoDenied: boolean
   onBack: () => void
   onConfirm: (coords: Coords) => void
 }
 
-export default function Locate({ start, onBack, onConfirm }: Props) {
+export default function Locate({ start, geoDenied, onBack, onConfirm }: Props) {
   const mapEl = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const [center, setCenter] = useState(start)
@@ -123,6 +124,12 @@ export default function Locate({ start, onBack, onConfirm }: Props) {
       <Header title="Місце дефекту" onBack={onBack} />
       <h2 className="title-l">Де зроблено фото?</h2>
       <p className="lead">Посуньте карту так, щоб точка стала на місце дефекту, або знайдіть вулицю</p>
+      {geoDenied && (
+        <p className="caption">
+          Геолокацію вимкнено для цього сайту. Можна вказати місце на карті або увімкнути: Налаштування →
+          Конфіденційність і безпека → Служби геолокації → Сайти Safari.
+        </p>
+      )}
 
       <div className="field">
         <label className="label" htmlFor="street-search">Пошук вулиці</label>

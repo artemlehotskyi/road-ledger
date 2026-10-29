@@ -37,18 +37,6 @@ export async function analyze(file: File, coords: Coords | null): Promise<Analyz
   return r.json()
 }
 
-/** Phone position, or null if denied, unavailable (e.g. plain http) or slower than 10 s. */
-export function getPosition(): Promise<Coords | null> {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null)
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
-    )
-  })
-}
-
 export interface Place {
   name: string
   place: string | null

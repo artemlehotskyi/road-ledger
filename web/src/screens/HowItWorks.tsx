@@ -49,6 +49,11 @@ export default function HowItWorks({ onBack }: { onBack: () => void }) {
       .catch(() => setCov('error'))
   }, [])
 
+  // same states as the numbers on the home screen
+  const count = (k: 'signed' | 'draft') =>
+    cov === 'loading' ? <span className="skeleton skeleton-num" aria-label="Завантаження" /> :
+    cov === 'error' ? <span className="muted">немає даних</span> : cov[k]
+
   return (
     <main className="page">
       <Header title="Як це працює" onBack={onBack} />
@@ -111,14 +116,14 @@ export default function HowItWorks({ onBack }: { onBack: () => void }) {
           Строк гарантії береться з тексту договору або проєкту договору в тендерній документації, з дослівною цитатою.
           Дата «орієнтовно до» рахується від завершення договору, а не від акта приймання робіт.
         </p>
-        <dl className="rows">
+        <dl className="rows rows-stat">
           <div className="row">
             <dt>Підписаний договір</dt>
-            <dd>{typeof cov === 'object' ? `${cov.signed} дог.` : ''}</dd>
+            <dd className="num">{count('signed')}</dd>
           </div>
           <div className="row">
             <dt>Проєкт договору — потребує перевірки</dt>
-            <dd>{typeof cov === 'object' ? `${cov.draft} дог.` : ''}</dd>
+            <dd className="num">{count('draft')}</dd>
           </div>
         </dl>
       </section>
