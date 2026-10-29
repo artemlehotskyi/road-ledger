@@ -1,0 +1,53 @@
+{
+  "_about": "Синоніми вулиць: назва, яку повертає Nominatim (osm_name), -> ключ вулиці в contracts.json (ledger_key). Кожен рядок має джерело. kind: renamed — вулицю перейменовано, в OSM є тег old_name; case_form — у базі назва стоїть в іншому відмінку чи формі (з переліку перехрестя). Перевірено 2026-10-28 через Nominatim search/reverse.",
+  "aliases": [
+    {
+      "osm_name": "вулиця Українських Добровольців",
+      "ledger_key": "білоруська",
+      "locality": null,
+      "kind": "renamed",
+      "source_url": "https://www.openstreetmap.org/way/155141393",
+      "evidence": "OSM old_name=Білоруська вулиця"
+    },
+    {
+      "osm_name": "вулиця Сергія Скальда",
+      "ledger_key": "комарова",
+      "locality": null,
+      "kind": "renamed",
+      "source_url": "https://www.openstreetmap.org/way/133039544",
+      "evidence": "OSM old_name=вулиця Комарова"
+    },
+    {
+      "osm_name": "вулиця Ореста Масикевича",
+      "ledger_key": "о. масикевич",
+      "locality": null,
+      "kind": "case_form",
+      "source_url": "https://www.openstreetmap.org/way/1303898539",
+      "evidence": "у базі «перехрестя вул. О. Масикевич, вул. Староленківської та 1-го пров. Піщаний» (UA-2024-06-24-010117-a-a1); у Чернівцях OSM має лише вулицю й провулок Ореста Масикевича, поруч зі Староленківською і 1-м Піщаним"
+    },
+    {
+      "osm_name": "провулок Ореста Масикевича",
+      "ledger_key": "о. масикевич",
+      "locality": null,
+      "kind": "case_form",
+      "source_url": "https://www.openstreetmap.org/way/245715372",
+      "evidence": "те саме перехрестя (UA-2024-06-24-010117-a-a1); street_key прибирає тип вулиці, тому вулиця і провулок мають однаковий ключ"
+    },
+    {
+      "osm_name": "Староленківська вулиця",
+      "ledger_key": "староленківської",
+      "locality": null,
+      "kind": "case_form",
+      "source_url": "https://www.openstreetmap.org/way/245715371",
+      "evidence": "у базі «вул. Староленківської» в родовому відмінку (UA-2024-06-24-010117-a-a1)"
+    },
+    {
+      "osm_name": "1-й Піщаний провулок",
+      "ledger_key": "1-го піщаний",
+      "locality": null,
+      "kind": "case_form",
+      "source_url": "https://www.openstreetmap.org/way/245715366",
+      "evidence": "у базі «1-го пров. Піщаний» в родовому відмінку (UA-2024-06-24-010117-a-a1)"
+    }
+  ]
+}

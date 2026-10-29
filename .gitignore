@@ -5,6 +5,8 @@ __pycache__/
 .venv/
 venv/
 .ipynb_checkpoints/
+.pytest_cache/
+*.log
 
 # Secrets
 .env
@@ -19,3 +21,7 @@ _import/
 
 # OS
 .DS_Store
+
+# Claude private docs (never commit)
+CLAUDE.md
+.claude-docs/

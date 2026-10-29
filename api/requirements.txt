@@ -1,0 +1,19 @@
+# Road Ledger API. Versions pinned from api/.venv (macOS, Python 3.14), 2026-10-28.
+# Linux VPS without GPU: install torch/torchvision from the CPU index first, otherwise pip pulls CUDA wheels:
+#   pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1
+pillow==13.0.0
+torch==2.15.0
+torchvision==0.29.2
+ultralytics==8.4.191
+
+# build_ledger.py (xlsx -> data/contracts.json)
+openpyxl==3.1.5
+
+# tests: .venv/bin/pytest
+pytest==9.2.0

@@ -1,0 +1,58 @@
+# Road Ledger API
+
+FastAPI service behind the Road Ledger app. You send it a photo of a road. It does four things:
+
+1. **Detect defects.** The YOLO11s model (`../model/weights/best.pt`) finds `pothole`, `patching` and `crack`. A crack is reported only at confidence ≥ 0.5, the other classes at ≥ 0.25.
+2. **Locate the photo.** It uses `lat`/`lon` from the form if they are sent, otherwise the EXIF GPS of the photo. The coordinates are turned into a street with Nominatim (OpenStreetMap) reverse geocoding. Only points inside Chernivtsi are looked up.
+3. **Match repair contracts.** It finds the repair contracts for that street in `data/contracts.json` (public Prozorro data). The match is by normalized street name, and initials match full first names. `data/street_aliases.json` covers streets that were renamed or that are spelled in a different grammatical case in the contract. Every alias has an OpenStreetMap source.
+4. **Give a warranty verdict.** Possible verdicts: `active`, `expired`, `unknown`, `no_contracts`, `no_location`. Each comes with a Ukrainian headline. Warranty end dates are estimates computed from the contract period, not from the works acceptance act.
+
+## Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/analyze` | multipart form: `image` (required), `lat` + `lon` (optional, passed together). Returns detections, location, street, matched contracts (with `verdict`, `warranty_confidence`, `matched_alias`) and `summary`. |
+| `GET` | `/contracts` | the full contract ledger (`data/contracts.json`) |
+| `GET` | `/health` | status, inference device, number of contracts |
+
+Interactive docs: `http://127.0.0.1:8000/docs`.
+
+## Run locally
+
+```bash
+cd api
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --reload
+```
+
+```bash
+curl -F image=@photo.jpg -F lat=48.2982 -F lon=25.9498 http://127.0.0.1:8000/analyze
+```
+
+## Tests
+
+```bash
+cd api
+.venv/bin/pytest -q                       # offline: Nominatim replaced with recorded responses
+RUN_LIVE=1 .venv/bin/pytest -q -k live    # also check the recorded points against the real Nominatim
+```
+
+`test_real_photo_detections` needs local road photos in `../_import/photos/crops/`. That folder is not in the repository, so without it the test is skipped (`pytest.skip`). All other tests use generated images.
+
+## Server (CPU-only)
+
+On a Linux server without a GPU, install torch from the CPU index **before** the requirements. Otherwise pip pulls the CUDA wheels, which take several GB:
+
+```bash
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+```
+
+CORS currently allows only `localhost` / `127.0.0.1`. Add the frontend domain in `main.py` before deploying, or serve the API and the frontend from one domain.
+
+## Data
+
+- `data/contracts.json` is built from the verified ledger by `build_ledger.py`. The source xlsx is not in the repository.
+- Street names: © OpenStreetMap contributors, ODbL.
+- Contract data: Prozorro public API.
