@@ -140,6 +140,7 @@ export async function mockAnalyze(kind: MockKind, photoUrl: string): Promise<Ana
     image_size: size,
     location: s.street ? { lat: 48.2915, lon: 25.9403, source: 'manual' } : null,
     street: s.street,
+    geocode: s.street ? { status: 'found', source: 'local', distance_m: null, detail: 'mock' } : null,
     contracts,
     other_works: otherWorks,
     summary: summarize(s.street, contracts, detections),

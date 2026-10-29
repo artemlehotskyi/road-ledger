@@ -3,7 +3,7 @@
  * so the request starts on the tap that opens the camera / gallery, and the result waits while the
  * person takes the photo.
  */
-import type { Coords } from './types'
+import type { Coords, GeocodeInfo } from './types'
 
 export type GeoStatus =
   | { state: 'idle' }
@@ -41,6 +41,17 @@ export function coordsWithin(p: Promise<GeoStatus>, ms: number): Promise<Coords 
     p.then((s) => (s.state === 'ok' ? s.coords : null)),
     new Promise<null>((r) => setTimeout(() => r(null), ms)),
   ])
+}
+
+const GEOCODE_STATUS = { found: 'знайдено', none: 'нічого', outside: 'поза містом', error: 'помилка сервісу' }
+
+/** «знайдено (локально, 8 м)», «нічого (найближча вулиця 140 м)», «помилка сервісу (Nominatim: HTTP 429)». */
+export function geocodeLabel(g: GeocodeInfo | null) {
+  if (!g) return '—'
+  const parts = [g.source === 'local' ? 'локально' : 'Nominatim']
+  if (g.distance_m !== null) parts.push(g.status === 'found' && g.source === 'local' ? `${g.distance_m} м` : `найближча вулиця ${g.distance_m} м`)
+  if (g.detail) parts.push(g.detail)
+  return g.status === 'outside' ? GEOCODE_STATUS.outside : `${GEOCODE_STATUS[g.status]} (${parts.join(', ')})`
 }
 
 export function geoLabel(s: GeoStatus) {

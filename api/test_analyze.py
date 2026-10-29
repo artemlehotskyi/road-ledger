@@ -354,42 +354,114 @@ def test_access_log_drops_query_string():
     assert "48.29" not in record.getMessage() and "/geocode/reverse" in record.getMessage()
 
 
-# --- map screen geocoding ------------------------------------------------------
+# --- local street index (data/streets_cv.json) -----------------------------------
 
-def test_geocode_reverse(client, offline):
-    assert client.get("/geocode/reverse", params={"lat": SKALDA[0], "lon": SKALDA[1]}).json() == {
-        "street": "вулиця Сергія Скальда", "in_city": True}
-
-
-def test_geocode_reverse_outside_city(client, monkeypatch):
-    monkeypatch.setattr(main, "reverse_geocode", lambda lat, lon: pytest.fail("called outside the bbox"))
-    body = client.get("/geocode/reverse", params={"lat": 50.4501, "lon": 30.5234}).json()
-    assert body == {"street": None, "in_city": False}
+# Nominatim search results, recorded 2026-10-29
+ZELENA = (48.2948114, 25.9602922)       # Зелена вулиця, Калічанка
+KHOTYNSKA = (48.3219158, 25.9534776)    # Хотинська вулиця, way/128398138
+FAR_FROM_STREETS = (48.27, 25.93)       # inside the hromada, 155 m from the nearest street line
+KYIV = (50.4501, 30.5234)
 
 
-def test_geocode_search_keeps_city_streets_once(client, monkeypatch):
+@pytest.fixture
+def no_nominatim(monkeypatch):
+    monkeypatch.setattr(main, "nominatim", lambda path, params: pytest.fail("Nominatim must not be called"))
+
+
+def search(client, q):
+    return client.get("/geocode/search", params={"q": q}).json()["results"]
+
+
+@pytest.mark.parametrize("q", ["Вишнева", "Вишневу", "вул вишнева", "вулиця Вишневій", "вишнвеа"])
+def test_search_vyshneva_any_form(client, no_nominatim, q):
+    first = search(client, q)[0]
+    assert first["name"] == "Вишнева вулиця" and first["place"].startswith("Чернівці")
+
+
+@pytest.mark.parametrize("q", ["Зелена", "Зеленій", "зеленою"])
+def test_search_zelena_city_first(client, no_nominatim, q):
+    results = search(client, q)
+    assert results[0] == {**results[0], "name": "Зелена вулиця", "place": "Чернівці"}
+    assert {r["place"] for r in results if r["name"] == "Зелена вулиця"} >= {"Чернівці", "Коровія"}
+
+
+def test_search_holovna_has_several_parts(client, no_nominatim):
+    results = search(client, "Головна")
+    city = [r for r in results if r["name"] == "Головна вулиця" and r["place"].startswith("Чернівці")]
+    assert len(city) >= 2 and len(results) <= 8
+
+
+def test_search_prefix_before_inside_match(client, no_nominatim):
+    names = [r["name"] for r in search(client, "Вишнева")]
+    assert names.index("Вишнева вулиця") < names.index("вулиця Дмитра Вишневецького")
+
+
+def test_search_short_query(client, no_nominatim):
+    assert search(client, " ab ") == []
+
+
+def reverse(client, point):
+    return client.get("/geocode/reverse", params={"lat": point[0], "lon": point[1]}).json()
+
+
+@pytest.mark.parametrize("point, street", [(ZELENA, "Зелена вулиця"), (KHOTYNSKA, "Хотинська вулиця"),
+                                           (SKALDA, "вулиця Сергія Скальда")])
+def test_reverse_known_points_locally(client, no_nominatim, point, street):
+    body = reverse(client, point)
+    assert body["street"] == street and body["in_city"] is True
+    assert body["geocode"]["status"] == "found" and body["geocode"]["source"] == "local"
+    assert body["geocode"]["distance_m"] <= 60
+
+
+def test_reverse_outside_city(client, no_nominatim):
+    body = reverse(client, KYIV)
+    assert body == {"street": None, "in_city": False,
+                    "geocode": {"status": "outside", "source": "local", "distance_m": None, "detail": None}}
+
+
+def test_reverse_far_from_streets_falls_back_to_nominatim(client, monkeypatch):
     calls = []
-
-    def fake(path, params):
-        calls.append((path, params))
-        return [
-            {"lat": "48.2925", "lon": "25.9365", "address": {"road": "Головна вулиця", **CITY}},
-            {"lat": "48.2800", "lon": "25.9400", "address": {"road": "Головна вулиця", **CITY}},  # another way, same street
-            {"lat": "48.2900", "lon": "25.9300", "address": {"road": "Головна вулиця", "house_number": "1", **CITY}},
-            {"lat": "48.3500", "lon": "25.8500", "address": {"road": "Головна вулиця", "village": "Сусіднє"}},
-            {"lat": "48.2900", "lon": "25.9300", "address": {"city": "Чернівці"}},  # no road
-        ]
-    monkeypatch.setattr(main, "nominatim", fake)
-    results = client.get("/geocode/search", params={"q": "Головна"}).json()["results"]
-    assert [r["name"] for r in results] == ["Головна вулиця", "Головна вулиця, 1"]
-    assert results[0] == {"name": "Головна вулиця", "place": "Чернівці", "lat": 48.2925, "lon": 25.9365}
-    path, params = calls[0]
-    assert path == "search" and params["bounded"] == 1 and params["viewbox"] == "25.8,48.4,26.1,48.2"
+    monkeypatch.setattr(main, "reverse_geocode", lambda lat, lon: calls.append(1) or {"address": {**CITY}})
+    body = reverse(client, FAR_FROM_STREETS)
+    assert calls and body["street"] is None and body["in_city"] is True
+    assert body["geocode"]["status"] == "none" and body["geocode"]["distance_m"] > 60
 
 
-def test_geocode_search_short_query_skips_nominatim(client, monkeypatch):
-    monkeypatch.setattr(main, "nominatim", lambda path, params: pytest.fail("called for a short query"))
-    assert client.get("/geocode/search", params={"q": " ab "}).json() == {"results": []}
+def test_nominatim_street_known_to_index_is_too_far(client, monkeypatch):
+    # recorded 2026-10-29: Nominatim answers «проспект Незалежності», which the index has 155 m away
+    monkeypatch.setattr(main, "reverse_geocode", lambda lat, lon: {"address": {"road": "проспект Незалежності", **CITY}})
+    body = reverse(client, FAR_FROM_STREETS)
+    assert body["street"] is None
+    assert body["geocode"] == {"status": "none", "source": "nominatim", "distance_m": 155,
+                               "detail": "Nominatim: «проспект Незалежності», over 60 m"}
+
+
+def test_nominatim_street_missing_from_index_is_accepted(client, monkeypatch):
+    monkeypatch.setattr(main, "reverse_geocode", lambda lat, lon: {"address": {"road": "Неіснуюча вулиця", **CITY}})
+    body = reverse(client, FAR_FROM_STREETS)
+    assert body["street"] == "Неіснуюча вулиця"  # synthetic: a street newer than the index
+    assert body["geocode"]["status"] == "found" and body["geocode"]["source"] == "nominatim"
+
+
+def test_nominatim_error_is_reported_without_coordinates(client, monkeypatch):
+    def fail(lat, lon):
+        raise main.GeocodeError("HTTP 429")
+    monkeypatch.setattr(main, "reverse_geocode", fail)
+    body = analyze(client, jpeg(), lat=FAR_FROM_STREETS[0], lon=FAR_FROM_STREETS[1]).json()
+    assert body["geocode"] == {"status": "error", "source": "nominatim", "distance_m": 155, "detail": "HTTP 429"}
+    assert body["summary"]["verdict"] == "no_contracts"
+
+
+def test_analyze_uses_local_index(client, no_nominatim):
+    body = analyze(client, jpeg(), lat=ZELENA[0], lon=ZELENA[1]).json()
+    assert body["street"]["name"] == "Зелена вулиця"
+    assert body["geocode"]["source"] == "local"
+    assert body["summary"]["verdict"] == "active"
+
+
+def test_streets_file_is_attributed():
+    about = json.loads((API_DIR / "data" / "streets_cv.json").read_text(encoding="utf-8"))["_about"]
+    assert "OpenStreetMap" in about and "ODbL" in about
 
 
 @pytest.mark.skipif(not CROPS.exists(), reason="_import/photos/crops is local only")

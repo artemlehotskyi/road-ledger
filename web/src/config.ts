@@ -10,7 +10,7 @@ export const E_RECEPTION_URL = 'https://e-cab.city.cv.ua/gov-ua-login'
 /** Start of the map when the phone gives no position: Central Square. */
 export const CHERNIVTSI_CENTER: Coords = { lat: 48.2921, lon: 25.9358 }
 
-/** Same box as CHERNIVTSI_BBOX in api/main.py: [[lat_min, lon_min], [lat_max, lon_max]]. */
+/** Box around Chernivtsi city hromada for the map: [[lat_min, lon_min], [lat_max, lon_max]]. */
 export const CHERNIVTSI_BOUNDS: [[number, number], [number, number]] = [
   [48.2, 25.8],
   [48.4, 26.1],

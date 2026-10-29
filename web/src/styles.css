@@ -262,6 +262,6 @@ a:focus-visible, .choice:has(input:focus-visible) {
 .rows-stat .row dd, .block .rows-stat .row dd {
   flex: 0 0 auto; text-align: right; white-space: nowrap; font-size: 20px; font-weight: 700;
 }
-.dev-badge-geo { top: auto; bottom: 0; }
+.dev-badge-geo { top: auto; bottom: 0; white-space: pre-line; max-width: 100%; }
 .lead-strong { color: var(--text); font-weight: 600; }
 .lead-strong + .lead { margin-top: 8px; }

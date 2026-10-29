@@ -11,8 +11,10 @@ pillow==13.0.0
 torch==2.15.0
 torchvision==0.29.2
 ultralytics==8.4.191
+shapely==2.2.0
+rapidfuzz==3.14.6
 
-# build_ledger.py (xlsx -> data/contracts.json)
+# build_ledger.py (xlsx -> data/contracts.json); build_streets.py uses httpx + shapely from above
 openpyxl==3.1.5
 
 # tests: .venv/bin/pytest

@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react'
 import { analyze, ApiError } from './api'
-import { coordsWithin, geoLabel, locate, PICK_WAIT_MS, type GeoStatus } from './geo'
+import { coordsWithin, geocodeLabel, geoLabel, locate, PICK_WAIT_MS, type GeoStatus } from './geo'
 import { mockAnalyze, mockKind } from './mock'
 import { CHERNIVTSI_CENTER } from './config'
 import type { AppealInput } from './appeal'
 import { nextScreen, sendsPhonePosition, type PhotoSource } from './flow'
-import type { AnalyzeResponse, Coords, ErrorKind, LocSource } from './types'
+import type { AnalyzeResponse, Coords, ErrorKind, GeocodeInfo, LocSource } from './types'
 import Home from './screens/Home'
 import Analysis from './screens/Analysis'
 import Result from './screens/Result'
@@ -32,6 +32,9 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' })
   const run = useRef(0)
   const [geo, setGeo] = useState<GeoStatus>({ state: 'idle' })
+  // ?debug=1 only: what went into /analyze and how the street was looked up (no coordinates)
+  const [sent, setSent] = useState('—')
+  const [geocode, setGeocode] = useState<GeocodeInfo | null>(null)
   const geoRef = useRef<{ status: GeoStatus; pending: Promise<GeoStatus> | null }>({ status: { state: 'idle' }, pending: null })
   const last = useRef<{ file: File; photoUrl: string; source: PhotoSource; coords: Promise<Coords | null> } | null>(null)
 
@@ -46,8 +49,20 @@ export default function App() {
     show({ name: 'analysis', photoUrl, step: 0 })
     try {
       // a point picked on the map always goes to the real API, also in mock mode
-      const data: AnalyzeResponse =
-        MOCK && source !== 'map' ? await mockAnalyze(MOCK, photoUrl) : await analyze(file, await coordsP)
+      let data: AnalyzeResponse
+      if (MOCK && source !== 'map') {
+        data = await mockAnalyze(MOCK, photoUrl)
+      } else {
+        const coords = await coordsP
+        setSent(
+          source === 'map' ? 'точка з карти'
+          : coords ? 'з координатами телефона'
+          : source === 'gallery' ? 'без координат (галерея: лише EXIF)'
+          : `без координат (не прийшли за ${PICK_WAIT_MS / 1000} с)`,
+        )
+        data = await analyze(file, coords)
+      }
+      setGeocode(data.geocode ?? null)
       for (const step of [1, 2, 3]) {
         if (id !== run.current) return
         setScreen({ name: 'analysis', photoUrl, step })
@@ -126,7 +141,13 @@ export default function App() {
   return (
     <>
       {MOCK && <div className="dev-badge">dev: mock={MOCK}</div>}
-      {DEBUG && <div className="dev-badge dev-badge-geo">геолокація: {geoLabel(geo)}</div>}
+      {DEBUG && (
+        <div className="dev-badge dev-badge-geo">
+          геолокація: {geoLabel(geo)}
+          {'\n'}в аналіз: {sent}
+          {'\n'}вулиця: {geocodeLabel(geocode)}
+        </div>
+      )}
       {screen.name === 'home' && <Home onStart={onStart} onPick={onPick} onHow={() => show({ name: 'how' })} />}
       {screen.name === 'how' && <HowItWorks onBack={home} />}
       {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} step={screen.step} />}
@@ -160,6 +181,7 @@ export default function App() {
           noPhotoGps={screen.noPhotoGps}
           onBack={() => show(screen.back)}
           onConfirm={confirmPlace}
+          onGeocode={setGeocode}
         />
       )}
       {screen.name === 'appeal' && (

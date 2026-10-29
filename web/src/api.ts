@@ -1,4 +1,4 @@
-import type { AnalyzeResponse, Coords, ErrorKind, LedgerContract } from './types'
+import type { AnalyzeResponse, Coords, ErrorKind, GeocodeInfo, LedgerContract } from './types'
 
 const ANALYZE_TIMEOUT_MS = 60_000
 
@@ -45,13 +45,13 @@ export interface Place {
 }
 
 /** Nearest street via the API (Nominatim behind it, 1 request/s). Throws ApiError on failure. */
-export async function reverseStreet(c: Coords, signal?: AbortSignal): Promise<{ street: string | null; in_city: boolean }> {
+export async function reverseStreet(c: Coords, signal?: AbortSignal): Promise<{ street: string | null; in_city: boolean; geocode: GeocodeInfo }> {
   const r = await fetch(`/api/geocode/reverse?lat=${c.lat}&lon=${c.lon}`, { signal })
   if (!r.ok) throw new ApiError('server')
   return r.json()
 }
 
-/** Streets and addresses inside Chernivtsi matching the query. */
+/** Streets of the hromada matching the query (local index on the server). */
 export async function searchPlaces(q: string, signal?: AbortSignal): Promise<Place[]> {
   const r = await fetch(`/api/geocode/search?q=${encodeURIComponent(q)}`, { signal })
   if (!r.ok) throw new ApiError('server')

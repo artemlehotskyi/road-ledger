@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { reverseStreet, searchPlaces, type Place } from '../api'
 import { CHERNIVTSI_BOUNDS, OSM_ATTRIBUTION, OSM_TILES } from '../config'
-import type { Coords } from '../types'
+import type { Coords, GeocodeInfo } from '../types'
 import Header from './Header'
 
 // wait until the map or the query stops changing; the API keeps Nominatim at 1 request/s on top of this
@@ -25,9 +25,10 @@ interface Props {
   noPhotoGps: boolean // gallery photo without EXIF GPS
   onBack: () => void
   onConfirm: (coords: Coords) => void
+  onGeocode?: (g: GeocodeInfo) => void // debug panel
 }
 
-export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm }: Props) {
+export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm, onGeocode }: Props) {
   const mapEl = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const [center, setCenter] = useState(start)
@@ -73,6 +74,7 @@ export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm
     const timer = setTimeout(async () => {
       try {
         const r = await reverseStreet(center, ctrl.signal)
+        onGeocode?.(r.geocode)
         setNearest(r.in_city ? { state: 'ok', street: r.street } : { state: 'outside' })
       } catch {
         if (!ctrl.signal.aborted) setNearest({ state: 'error' })

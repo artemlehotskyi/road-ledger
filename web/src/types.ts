@@ -51,11 +51,20 @@ export interface Contract extends LedgerContract {
   matched_alias: MatchedAlias | null
 }
 
+/** How the street was looked up (debug panel); never contains coordinates. */
+export interface GeocodeInfo {
+  status: 'found' | 'none' | 'outside' | 'error'
+  source: 'local' | 'nominatim'
+  distance_m: number | null // to the nearest street line of the local index
+  detail: string | null
+}
+
 export interface AnalyzeResponse {
   detections: Detection[]
   image_size: { width: number; height: number }
   location: { lat: number; lon: number; source: 'manual' | 'exif' } | null
   street: { name: string; key: string } | null
+  geocode: GeocodeInfo | null // null without coordinates
   contracts: Contract[]
   other_works: Contract[] // scope=territory on the same street, not part of the verdict
   summary: { verdict: SummaryVerdict; title: string; headline: string }

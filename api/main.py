@@ -20,20 +20,20 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.formparsers import MultiPartParser
 from ultralytics import YOLO
 
+import street_index
 from streets import keys_match, load_aliases, street_key
 
 API_DIR = Path(__file__).resolve().parent
 WEIGHTS = API_DIR.parent / "model" / "weights" / "best.pt"
 CONTRACTS_PATH = API_DIR / "data" / "contracts.json"
 ALIASES_PATH = API_DIR / "data" / "street_aliases.json"
+STREETS_PATH = API_DIR / "data" / "streets_cv.json"
 
 CONF = 0.25
 CLASS_MIN_CONF = {"crack": 0.5}
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 USER_AGENT = "RoadLedger/0.1"
-# Rough box around Chernivtsi city hromada; the authoritative check is Nominatim's address.
-CHERNIVTSI_BBOX = (48.20, 25.80, 48.40, 26.10)  # lat_min, lon_min, lat_max, lon_max
 CHERNIVTSI_NAMES = {"Чернівці", "Чернівецька міська громада"}
 
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -68,6 +68,7 @@ async def lifespan(app):
     state["model_lock"] = threading.Lock()
     state["contracts"] = json.loads(CONTRACTS_PATH.read_text(encoding="utf-8"))
     state["aliases"] = load_aliases(ALIASES_PATH)
+    state["streets"] = street_index.load(STREETS_PATH)
     state["http"] = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=10)
     yield
     state["http"].close()
@@ -132,6 +133,10 @@ def exif_gps(image):
     return round(lat, 6), round(lon, 6)
 
 
+class GeocodeError(Exception):
+    """Nominatim failed; the message is safe to show (no coordinates)."""
+
+
 _geo_cache = {}
 _geo_lock = threading.Lock()
 _geo_last_call = [0.0]
@@ -153,8 +158,11 @@ def nominatim(path, params):
                 **params, "format": "jsonv2", "addressdetails": 1, "accept-language": "uk"})
             r.raise_for_status()
             data = r.json()
+        except httpx.HTTPStatusError as e:
+            raise GeocodeError(f"HTTP {e.response.status_code}")
         except (httpx.HTTPError, ValueError) as e:
-            raise HTTPException(502, f"Nominatim {path} failed: {e}")
+            # the class name only: httpx messages carry the request URL with the coordinates
+            raise GeocodeError(type(e).__name__)
         finally:
             _geo_last_call[0] = time.monotonic()
         _geo_cache[key] = data
@@ -169,47 +177,36 @@ def address_in_city(address):
     return bool(CHERNIVTSI_NAMES & {address.get("city"), address.get("municipality")})
 
 
-def search_places(q):
-    """Streets and addresses inside the Chernivtsi box, for the map screen; one row per street and locality."""
-    lat_min, lon_min, lat_max, lon_max = CHERNIVTSI_BBOX
-    found = nominatim("search", {
-        "q": q.strip(), "viewbox": f"{lon_min},{lat_max},{lon_max},{lat_min}", "bounded": 1,
-        "countrycodes": "ua", "limit": 10,
-    })
-    results, seen = [], set()
-    for item in found:
-        address = item.get("address") or {}
-        road = address.get("road")
-        if not road or not address_in_city(address):
-            continue
-        name = f"{road}, {address['house_number']}" if address.get("house_number") else road
-        place = address.get("village") or address.get("hamlet") or address.get("suburb") or address.get("city")
-        if (name, place) in seen:
-            continue
-        seen.add((name, place))
-        results.append({"name": name, "place": place, "lat": float(item["lat"]), "lon": float(item["lon"])})
-    return results
-
-
-def in_chernivtsi_bbox(lat, lon):
-    lat_min, lon_min, lat_max, lon_max = CHERNIVTSI_BBOX
-    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
-
-
 def resolve_street(lat, lon):
-    """Returns (street, locality, in_city). street is {name, key} or None."""
-    if not in_chernivtsi_bbox(lat, lon):
-        return None, None, False
-    data = reverse_geocode(lat, lon)
-    address = data.get("address") or {}
-    if not address_in_city(address):
-        return None, None, False
+    """Returns (street, locality, in_city, geocode). street is {name, key} or None.
+    The local OSM street index answers first; Nominatim only when no street line is within 60 m,
+    and its answer counts only for a street missing from the index.
+    geocode describes the lookup for the debug panel and never contains coordinates."""
+    hit = state["streets"].reverse(lat, lon)
+    if hit["status"] == "outside":
+        return None, None, False, {"status": "outside", "source": "local", "distance_m": None, "detail": None}
+    if hit["status"] == "found":
+        street = {"name": hit["name"], "key": street_key(hit["name"])}
+        return street, hit["locality"], True, {"status": "found", "source": "local",
+                                                "distance_m": hit["distance_m"], "detail": None}
+    nearest = hit["distance_m"]
+    try:
+        address = reverse_geocode(lat, lon).get("address") or {}
+    except GeocodeError as e:
+        return None, None, True, {"status": "error", "source": "nominatim", "distance_m": nearest, "detail": str(e)}
+    name = address.get("road")
+    if not name or not address_in_city(address):
+        return None, None, True, {"status": "none", "source": "nominatim", "distance_m": nearest,
+                                  "detail": f"nearest street line {nearest} m away"}
     # Villages of the city hromada (e.g. Коровія) are matched separately from city streets.
     locality = None if address.get("city") == "Чернівці" else address.get("village") or address.get("hamlet")
-    name = address.get("road")
-    if not name:
-        return None, locality, True
-    return {"name": name, "key": street_key(name)}, locality, True
+    # Nominatim has no distance limit: a street the index already has is the one that is over 60 m away.
+    # Only a street missing from the index (newer OSM data) is accepted.
+    if state["streets"].has(name, locality):
+        return None, None, True, {"status": "none", "source": "nominatim", "distance_m": nearest,
+                                  "detail": f"Nominatim: «{name}», over 60 m"}
+    return {"name": name, "key": street_key(name)}, locality, True, {
+        "status": "found", "source": "nominatim", "distance_m": nearest, "detail": None}
 
 
 # --- ledger ------------------------------------------------------------------
@@ -330,15 +327,16 @@ def contracts():
 @app.get("/geocode/reverse")
 def geocode_reverse(lat: float, lon: float):
     """Nearest street for the map screen, the same lookup /analyze uses."""
-    street, _, inside = resolve_street(lat, lon)
-    return {"street": street["name"] if street else None, "in_city": inside}
+    street, _, inside, geocode = resolve_street(lat, lon)
+    return {"street": street["name"] if street else None, "in_city": inside, "geocode": geocode}
 
 
 @app.get("/geocode/search")
 def geocode_search(q: str):
+    """Streets of the hromada by name, from the local index (case forms and typos tolerated); max 8."""
     if len(q.strip()) < 3:
         return {"results": []}
-    return {"results": search_places(q)}
+    return {"results": state["streets"].search(q)}
 
 
 @app.post("/analyze")
@@ -361,9 +359,9 @@ def analyze(image: UploadFile = File(...), lat: float | None = Form(None), lon: 
     else:
         location = None
 
-    street, locality, in_city, matched, other_works = None, None, False, [], []
+    street, locality, in_city, matched, other_works, geocode = None, None, False, [], [], None
     if location:
-        street, locality, in_city = resolve_street(location["lat"], location["lon"])
+        street, locality, in_city, geocode = resolve_street(location["lat"], location["lon"])
         if street:
             today = dt.date.today()
 
@@ -382,6 +380,7 @@ def analyze(image: UploadFile = File(...), lat: float | None = Form(None), lon: 
         "image_size": {"width": img.width, "height": img.height},
         "location": location,
         "street": street,
+        "geocode": geocode,
         "contracts": matched,
         "other_works": other_works,
         "summary": summarize(location, street, in_city, matched, detections),
