@@ -53,6 +53,16 @@ pip install -r requirements.txt
 
 CORS currently allows only `localhost` / `127.0.0.1`. Add the frontend domain in `main.py` before deploying, or serve the API and the frontend from one domain.
 
+## Privacy
+
+Photos and coordinates are not written to disk:
+
+- uploads are kept in memory (Starlette's spool threshold is raised from 1 MB to the upload limit), and `POST` bodies over 25 MB or without `Content-Length` are refused (413 / 411);
+- the uvicorn access log drops the query string, so `/geocode/*` coordinates and search text are not logged;
+- the model is called without `save`, and the Nominatim cache lives in memory only.
+
+Coordinates and search text are sent to Nominatim (OpenStreetMap Foundation), which has its own logs. If a reverse proxy sits in front (e.g. Caddy), keep its access log off or make sure it does not record query strings.
+
 ## Data
 
 - `data/contracts.json` is built from the verified ledger by `build_ledger.py`. The source xlsx is not in the repository.

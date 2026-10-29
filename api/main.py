@@ -5,6 +5,7 @@ Run: cd api && .venv/bin/uvicorn main:app --reload
 import datetime as dt
 import io
 import json
+import logging
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -12,9 +13,11 @@ from pathlib import Path
 
 import httpx
 import torch
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
+from starlette.formparsers import MultiPartParser
 from ultralytics import YOLO
 
 from streets import keys_match, load_aliases, street_key
@@ -34,6 +37,27 @@ CHERNIVTSI_BBOX = (48.20, 25.80, 48.40, 26.10)  # lat_min, lon_min, lat_max, lon
 CHERNIVTSI_NAMES = {"Чернівці", "Чернівецька міська громада"}
 
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
+
+# --- privacy: photos and coordinates never reach the disk ----------------------
+# Starlette spools uploads over 1 MB to a temporary file; keep the whole photo in memory instead,
+# and refuse bodies that could still overflow to disk.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MultiPartParser.spool_max_size = MAX_UPLOAD_BYTES + 1
+
+
+class DropQueryString(logging.Filter):
+    """uvicorn's access log prints the full path; /geocode/* carries coordinates and search text in the query."""
+
+    def filter(self, record):
+        # uvicorn.access args: (client_addr, method, full_path, http_version, status_code)
+        if isinstance(record.args, tuple) and len(record.args) == 5 and isinstance(record.args[2], str):
+            args = list(record.args)
+            args[2] = args[2].split("?", 1)[0]
+            record.args = tuple(args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(DropQueryString())
 
 state = {}
 
@@ -56,6 +80,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def limit_upload(request: Request, call_next):
+    if request.method == "POST":
+        size = request.headers.get("content-length")
+        if size is None:
+            return JSONResponse({"detail": "Content-Length required"}, status_code=411)
+        if not size.isdigit() or int(size) > MAX_UPLOAD_BYTES:
+            return JSONResponse({"detail": f"upload larger than {MAX_UPLOAD_BYTES // 2**20} MB"}, status_code=413)
+    return await call_next(request)
 
 
 # --- detection ---------------------------------------------------------------

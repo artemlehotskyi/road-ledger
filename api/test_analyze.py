@@ -6,7 +6,9 @@ RUN_LIVE=1 also checks the same points against the real Nominatim.
 """
 import io
 import json
+import logging
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -326,6 +328,30 @@ def test_lat_without_lon(client):
 def test_not_an_image(client):
     r = client.post("/analyze", files={"image": ("a.jpg", b"not an image", "image/jpeg")})
     assert r.status_code == 400
+
+
+# --- privacy -------------------------------------------------------------------
+
+def test_large_photo_stays_in_memory(client, monkeypatch):
+    # anything over Starlette's default 1 MB would roll over to a temporary file on disk
+    rolled = []
+    monkeypatch.setattr(tempfile.SpooledTemporaryFile, "rollover", lambda self: rolled.append(True))
+    big = jpeg() + b"\0" * (3 * 1024 * 1024)  # trailing bytes after the JPEG end marker are ignored by PIL
+    assert analyze(client, big).status_code == 200
+    assert rolled == []
+
+
+def test_upload_over_limit_refused(client):
+    r = client.post("/analyze", content=b"x", headers={
+        "content-type": "multipart/form-data; boundary=x", "content-length": str(main.MAX_UPLOAD_BYTES + 1)})
+    assert r.status_code == 413
+
+
+def test_access_log_drops_query_string():
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                               ("127.0.0.1:5000", "GET", "/geocode/reverse?lat=48.29&lon=25.93", "1.1", 200), None)
+    assert main.DropQueryString().filter(record)
+    assert "48.29" not in record.getMessage() and "/geocode/reverse" in record.getMessage()
 
 
 # --- map screen geocoding ------------------------------------------------------
