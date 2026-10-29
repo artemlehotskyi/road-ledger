@@ -25,3 +25,8 @@ _import/
 # Claude private docs (never commit)
 CLAUDE.md
 .claude-docs/
+
+# Personal working files (not for the public repo)
+/.obsidian/
+/skills/
+/Презентація.md
