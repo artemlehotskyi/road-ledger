@@ -143,6 +143,9 @@ export default function Locate({ start, geoDenied, noPhotoGps, onBack, onConfirm
           type="search"
           enterKeyHint="search"
           autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           placeholder="Наприклад, Головна"
           value={query}
           onChange={(e) => {

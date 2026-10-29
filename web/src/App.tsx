@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { analyze, ApiError } from './api'
 import { coordsWithin, geocodeLabel, geoLabel, locate, PICK_WAIT_MS, type GeoStatus } from './geo'
 import { mockAnalyze, mockKind } from './mock'
@@ -16,15 +16,13 @@ import Appeal from './screens/Appeal'
 
 type Screen =
   | { name: 'home' }
-  | { name: 'analysis'; photoUrl: string; step: number }
+  | { name: 'analysis'; photoUrl: string }
   | { name: 'result'; photoUrl: string; data: AnalyzeResponse; locSource: LocSource }
   | { name: 'error'; kind: ErrorKind }
-  | { name: 'locate'; start: Coords; noPhotoGps: boolean; back: Screen }
-  | { name: 'appeal'; appeal: Omit<AppealInput, 'name' | 'contact'>; back: Screen }
+  | { name: 'locate'; start: Coords; noPhotoGps: boolean }
+  | { name: 'appeal'; appeal: Omit<AppealInput, 'name' | 'contact'> }
   | { name: 'how' }
 
-const STEP_DELAY_MS = 300
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const MOCK = mockKind()
 const DEBUG = new URLSearchParams(location.search).get('debug') === '1'
 
@@ -38,15 +36,50 @@ export default function App() {
   const geoRef = useRef<{ status: GeoStatus; pending: Promise<GeoStatus> | null }>({ status: { state: 'idle' }, pending: null })
   const last = useRef<{ file: File; photoUrl: string; source: PhotoSource; coords: Promise<Coords | null> } | null>(null)
 
-  const show = (s: Screen) => {
+  // Browser history mirrors the screens, so iOS swipe-back and Android «Back» stay inside the app.
+  // Screens hold blobs and files, so they live here; history.state keeps only the index.
+  const entries = useRef<{ screen: Screen; y: number }[]>([{ screen: { name: 'home' }, y: 0 }])
+  const at = useRef(0)
+
+  useEffect(() => {
+    history.scrollRestoration = 'manual'
+    history.replaceState({ i: 0 }, '')
+    const onPop = (e: PopStateEvent) => {
+      run.current++ // leaving the analysis screen cancels it
+      const i = Math.min(typeof e.state?.i === 'number' ? e.state.i : 0, entries.current.length - 1)
+      at.current = i
+      const { screen, y } = entries.current[i]
+      setScreen(screen)
+      requestAnimationFrame(() => window.scrollTo(0, y))
+    }
+    addEventListener('popstate', onPop)
+    return () => removeEventListener('popstate', onPop)
+  }, [])
+
+  /** A new step forward: «Back» returns to the current screen. */
+  const push = (s: Screen) => {
+    entries.current[at.current].y = window.scrollY
+    entries.current = [...entries.current.slice(0, at.current + 1), { screen: s, y: 0 }]
+    at.current++
+    history.pushState({ i: at.current }, '')
     setScreen(s)
     window.scrollTo(0, 0)
   }
 
-  async function start(file: File, photoUrl: string, source: PhotoSource, coordsP: Promise<Coords | null>) {
+  /** Same step, new state (analysis → result): «Back» skips the replaced screen. */
+  const replace = (s: Screen) => {
+    entries.current[at.current] = { screen: s, y: 0 }
+    setScreen(s)
+    window.scrollTo(0, 0)
+  }
+
+  /** The on-screen back arrow does what the browser's «Back» does. */
+  const back = () => (at.current > 0 ? history.back() : home())
+
+  async function start(file: File, photoUrl: string, source: PhotoSource, coordsP: Promise<Coords | null>, how: 'push' | 'replace') {
     const id = ++run.current
     last.current = { file, photoUrl, source, coords: coordsP }
-    show({ name: 'analysis', photoUrl, step: 0 })
+    ;(how === 'push' ? push : replace)({ name: 'analysis', photoUrl })
     try {
       // a point picked on the map always goes to the real API, also in mock mode
       let data: AnalyzeResponse
@@ -63,24 +96,20 @@ export default function App() {
         data = await analyze(file, coords)
       }
       setGeocode(data.geocode ?? null)
-      for (const step of [1, 2, 3]) {
-        if (id !== run.current) return
-        setScreen({ name: 'analysis', photoUrl, step })
-        await sleep(STEP_DELAY_MS)
-      }
+      // the result shows as soon as the answer arrives: no step-by-step replay
       if (id !== run.current) return
       const next = nextScreen(source, data)
       if (next.screen === 'locate') {
         // a gallery photo wasn't sent with the phone position, but it is still the best place to start the map
         const phone = next.noPhotoGps ? await photoCoords() : await coordsP
         if (id !== run.current) return
-        show({ name: 'locate', start: phone ?? CHERNIVTSI_CENTER, noPhotoGps: next.noPhotoGps, back: { name: 'home' } })
+        replace({ name: 'locate', start: phone ?? CHERNIVTSI_CENTER, noPhotoGps: next.noPhotoGps })
       } else {
-        show({ name: 'result', photoUrl, data, locSource: next.locSource })
+        replace({ name: 'result', photoUrl, data, locSource: next.locSource })
       }
     } catch (e) {
       if (id !== run.current) return
-      show({ name: 'error', kind: e instanceof ApiError ? e.kind : 'server' })
+      replace({ name: 'error', kind: e instanceof ApiError ? e.kind : 'server' })
     }
   }
 
@@ -109,12 +138,14 @@ export default function App() {
 
   function onPick(file: File, source: 'camera' | 'gallery') {
     if (last.current) URL.revokeObjectURL(last.current.photoUrl)
-    start(file, URL.createObjectURL(file), source, sendsPhonePosition(source) ? photoCoords() : Promise.resolve(null))
+    start(file, URL.createObjectURL(file), source, sendsPhonePosition(source) ? photoCoords() : Promise.resolve(null), 'push')
   }
 
   function home() {
     run.current++
-    show({ name: 'home' })
+    // back to the first history entry; popstate shows the home screen
+    if (at.current > 0) history.go(-at.current)
+    else replace({ name: 'home' })
   }
 
   function retry(kind: ErrorKind) {
@@ -122,20 +153,20 @@ export default function App() {
     // the same unreadable file would fail again: pick another one
     if (kind === 'photo' || !l) return home()
     const coords = l.source === 'camera' ? l.coords.then((c) => c ?? photoCoords()) : l.coords
-    start(l.file, l.photoUrl, l.source, coords)
+    start(l.file, l.photoUrl, l.source, coords, 'replace')
   }
 
   function confirmPlace(coords: Coords) {
     const l = last.current
     if (!l) return home()
     // the same File object: the user doesn't pick the photo again
-    start(l.file, l.photoUrl, 'map', Promise.resolve(coords))
+    start(l.file, l.photoUrl, 'map', Promise.resolve(coords), 'replace')
   }
 
-  function changePlace(back: Screen, location: Coords | null) {
+  function changePlace(location: Coords | null) {
     const g = geoRef.current.status
     const phone = g.state === 'ok' ? g.coords : null
-    show({ name: 'locate', start: location ?? phone ?? CHERNIVTSI_CENTER, noPhotoGps: false, back })
+    push({ name: 'locate', start: location ?? phone ?? CHERNIVTSI_CENTER, noPhotoGps: false })
   }
 
   return (
@@ -148,18 +179,18 @@ export default function App() {
           {'\n'}вулиця: {geocodeLabel(geocode)}
         </div>
       )}
-      {screen.name === 'home' && <Home onStart={onStart} onPick={onPick} onHow={() => show({ name: 'how' })} />}
-      {screen.name === 'how' && <HowItWorks onBack={home} />}
-      {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} step={screen.step} />}
+      {screen.name === 'home' && <Home onStart={onStart} onPick={onPick} onHow={() => push({ name: 'how' })} />}
+      {screen.name === 'how' && <HowItWorks onBack={back} />}
+      {screen.name === 'analysis' && <Analysis photoUrl={screen.photoUrl} />}
       {screen.name === 'result' && (
         <Result
           photoUrl={screen.photoUrl}
           data={screen.data}
           locSource={screen.locSource}
           onBack={home}
-          onChangeStreet={() => changePlace(screen, screen.data.location)}
+          onChangeStreet={() => changePlace(screen.data.location)}
           onAppeal={(contract, defect) =>
-            show({
+            push({
               name: 'appeal',
               appeal: {
                 contract,
@@ -167,7 +198,6 @@ export default function App() {
                 street: screen.data.street?.name ?? contract.street,
                 coords: screen.data.location,
               },
-              back: screen,
             })
           }
         />
@@ -179,13 +209,13 @@ export default function App() {
           start={screen.start}
           geoDenied={geo.state === 'denied'}
           noPhotoGps={screen.noPhotoGps}
-          onBack={() => show(screen.back)}
+          onBack={back}
           onConfirm={confirmPlace}
           onGeocode={setGeocode}
         />
       )}
       {screen.name === 'appeal' && (
-        <Appeal appeal={screen.appeal} photo={last.current?.file ?? null} onBack={() => show(screen.back)} />
+        <Appeal appeal={screen.appeal} photo={last.current?.file ?? null} onBack={back} />
       )}
     </>
   )

@@ -65,6 +65,8 @@ state = {}
 @asynccontextmanager
 async def lifespan(app):
     state["model"] = YOLO(str(WEIGHTS))
+    # one inference on a blank image: the first real request doesn't pay ~4 s of lazy setup
+    state["model"].predict(Image.new("RGB", (640, 640)), device=DEVICE, verbose=False)
     state["model_lock"] = threading.Lock()
     state["contracts"] = json.loads(CONTRACTS_PATH.read_text(encoding="utf-8"))
     state["aliases"] = load_aliases(ALIASES_PATH)

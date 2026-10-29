@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { appealText, type AppealInput } from '../appeal'
 import { E_RECEPTION_URL } from '../config'
-import { ExternalArrow } from '../icons'
+import { Check, ExternalArrow } from '../icons'
 import Header from './Header'
 
 const COPIED_MS = 2000
@@ -45,6 +45,7 @@ export default function Appeal({ appeal, photo, onBack }: Props) {
           id="appeal-name"
           className="input"
           autoComplete="name"
+          autoCapitalize="words"
           enterKeyHint="next"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -66,7 +67,10 @@ export default function Appeal({ appeal, photo, onBack }: Props) {
 
       <div className="actions actions-inline">
         <button className="btn btn-primary" onClick={async () => setCopy((await copyText(text)) ? 'done' : 'failed')}>
-          {copy === 'done' ? 'Скопійовано' : 'Скопіювати текст'}
+          {/* the key remounts the label, so the new text fades in */}
+          <span key={copy === 'done' ? 'done' : 'idle'} className="btn-label">
+            {copy === 'done' ? <><Check /> Скопійовано</> : 'Скопіювати текст'}
+          </span>
         </button>
         {canShare && (
           <button className="btn btn-secondary" onClick={share}>Поділитися</button>

@@ -13,10 +13,16 @@
   --radius: 4px;
   --gutter: 24px;
   --font: 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent; /* controls have their own :active state */
+}
+/* pull-to-refresh would reload the page and lose the result: it lives only in memory */
+html, body { overscroll-behavior-y: none; }
 body {
   margin: 0;
   background: var(--bg);
@@ -39,8 +45,10 @@ a { color: var(--text); }
 .page {
   max-width: 430px;
   margin: 0 auto;
-  padding: 0 var(--gutter) calc(32px + env(safe-area-inset-bottom));
+  padding: env(safe-area-inset-top, 0px) max(var(--gutter), env(safe-area-inset-right, 0px))
+    calc(32px + env(safe-area-inset-bottom, 0px)) max(var(--gutter), env(safe-area-inset-left, 0px));
   min-height: 100dvh;
+  animation: fade-in 150ms var(--ease-out);
 }
 .home { display: flex; flex-direction: column; }
 .home-hero { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 32px 0; }
@@ -117,6 +125,8 @@ a:focus-visible, .choice:has(input:focus-visible) {
   font-size: 11px; font-weight: 700; line-height: 1; padding: 4px 5px; white-space: nowrap;
 }
 .box-label-inside { bottom: auto; top: 0; left: 0; }
+.box-label-right { left: auto; right: -2px; }
+.box-label-inside.box-label-right { right: 0; }
 
 /* analysis steps */
 .steps { margin-top: 24px; border-top: 1px solid var(--line); }
@@ -141,10 +151,13 @@ a:focus-visible, .choice:has(input:focus-visible) {
   --verdict: var(--unknown);
 }
 .verdict-title {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: flex-start; gap: 12px;
   font-size: 28px; line-height: 1.15; font-weight: 700; color: var(--verdict);
 }
-.verdict-square { width: 12px; height: 12px; flex: 0 0 12px; background: var(--verdict); }
+.verdict-square {
+  width: 12px; height: 12px; flex: 0 0 12px; background: var(--verdict);
+  margin-top: calc((1.15em - 12px) / 2); /* centred on the first line when the title wraps */
+}
 .verdict-text { margin-top: 12px; font-size: 16px; }
 .verdict-confidence { margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--muted); }
 
@@ -185,7 +198,7 @@ a:focus-visible, .choice:has(input:focus-visible) {
 .letter {
   margin-top: 16px; padding: 16px; background: var(--surface);
   border: 1px solid var(--field); border-radius: var(--radius);
-  font-size: 15px; white-space: pre-wrap;
+  font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .prose { font-size: 15px; }
 .prose-list { border-top: 1px solid var(--line); }
@@ -210,6 +223,7 @@ a:focus-visible, .choice:has(input:focus-visible) {
   background: var(--surface); color: var(--text);
   border: 1px solid var(--field); border-radius: var(--radius);
   font: 500 16px var(--font); /* 16px keeps iOS from zooming in on focus */
+  -webkit-appearance: none; appearance: none; /* type=search gets Safari's own rounded field otherwise */
   scroll-margin: 96px 0 160px;
 }
 .input:focus { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
@@ -228,11 +242,11 @@ a:focus-visible, .choice:has(input:focus-visible) {
 .result-item:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .map-wrap { position: relative; margin: 20px calc(-1 * var(--gutter)) 0; }
 /* not full height: the page still scrolls with a finger above or below the map */
-.map { height: min(48dvh, 420px); background: var(--skeleton); }
+.map { height: min(48svh, 420px); background: var(--skeleton); } /* svh: the map doesn't resize while the URL bar collapses */
 .map:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .map-pin {
   position: absolute; left: 50%; top: 50%; z-index: 500; pointer-events: none;
-  transform: translate(-50%, -100%); transition: transform 0.15s;
+  transform: translate(-50%, -100%); transition: transform 150ms var(--ease-out);
 }
 .map-pin svg { display: block; }
 .map-pin-moving { transform: translate(-50%, calc(-100% - 8px)); }
@@ -246,7 +260,7 @@ a:focus-visible, .choice:has(input:focus-visible) {
   background: var(--bg); border-top: 1px solid var(--line);
 }
 .page-locate { padding-bottom: 0; }
-.nearest { margin-bottom: 12px; font-size: 15px; color: var(--text-2); min-height: 22px; }
+.nearest { margin-bottom: 12px; font-size: 15px; color: var(--text-2); min-height: 44px; } /* two lines: a long street name doesn't make the bar jump */
 .nearest strong { color: var(--text); font-weight: 700; }
 .leaflet-container { font: 500 12px var(--font); }
 .leaflet-touch .leaflet-bar a, .leaflet-bar a {
@@ -265,3 +279,44 @@ a:focus-visible, .choice:has(input:focus-visible) {
 .dev-badge-geo { top: auto; bottom: 0; white-space: pre-line; max-width: 100%; }
 .lead-strong { color: var(--text); font-weight: 600; }
 .lead-strong + .lead { margin-top: 8px; }
+
+/* touch: no double-tap delay, no text selection or callout on controls (content text stays selectable) */
+button, a, label.btn, .choice {
+  touch-action: manipulation;
+}
+.btn, .link, .icon-btn, .result-item, .choice, .links a {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+@media (hover: none) {
+  .leaflet-bar a:hover { background-color: #fff; } /* Leaflet's hover sticks after a tap */
+}
+
+/* press feedback, on press rather than on release */
+.btn { transition: transform 100ms var(--ease-out); }
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.link, .icon-btn, .result-item, .choice, .links a { transition: opacity 100ms var(--ease-out); }
+.link:active, .icon-btn:active, .result-item:active, .choice:active, .links a:active { opacity: 0.6; }
+
+/* motion: only where something actually happens */
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes box-in { from { opacity: 0; transform: scale(0.96); } }
+@keyframes pulse { to { opacity: 0.35; } }
+
+/* waiting for the server: the active step breathes, nothing pretends to progress */
+.step-active .step-mark::before { animation: pulse 900ms ease-in-out infinite alternate; }
+/* the photo replaces its skeleton */
+.photo { animation: fade-in 200ms var(--ease-out); }
+/* defect boxes one by one, after the photo */
+.box { animation: box-in 200ms var(--ease-out) calc(var(--i, 0) * 60ms) both; }
+/* the verdict comes in as the conclusion, without waiting for the photo */
+.verdict { animation: rise-in 250ms var(--ease-out) 150ms both; }
+.choices { animation: drop-in 150ms var(--ease-out); }
+.btn-label { display: inline-flex; align-items: center; gap: 8px; animation: fade-in 150ms var(--ease-out); }
+
+/* reduced motion: state changes stay (labels, marks, content), movement goes */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .btn:active:not(:disabled) { transform: none; opacity: 0.85; }
+}

@@ -161,18 +161,22 @@ function PhotoWithBoxes({ photoUrl, data }: { photoUrl: string; data: AnalyzeRes
           const [x1, y1, x2, y2] = d.box
           // boxes are in image pixels; percentages scale them to the rendered size
           const top = (y1 / height) * 100
+          // a label on a box in the right half hangs from the box's right edge, or the frame would clip it
+          const right = (x1 + x2) / 2 > width / 2
           return (
             <div
               key={i}
               className="box"
               style={{
+                // one by one, the whole set within 240 ms
+                '--i': Math.min(i, 4),
                 left: `${(x1 / width) * 100}%`,
                 top: `${top}%`,
                 width: `${((x2 - x1) / width) * 100}%`,
                 height: `${((y2 - y1) / height) * 100}%`,
-              }}
+              } as React.CSSProperties}
             >
-              <span className={`box-label${top < 6 ? ' box-label-inside' : ''}`}>
+              <span className={`box-label${top < 6 ? ' box-label-inside' : ''}${right ? ' box-label-right' : ''}`}>
                 {DEFECT_LABEL[d.class]} {Math.round(d.confidence * 100)}%
               </span>
             </div>

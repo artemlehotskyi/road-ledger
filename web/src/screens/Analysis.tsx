@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Check } from '../icons'
 import Brand from './Brand'
 
 const STEPS = ['Шукаю дефекти на фото', 'Визначаю вулицю', 'Перевіряю договори Prozorro']
 
-export default function Analysis({ photoUrl, step }: { photoUrl: string; step: number }) {
+// The server does all three steps in one request: the list says what is happening, without fake progress
+export default function Analysis({ photoUrl }: { photoUrl: string }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
 
@@ -25,16 +25,12 @@ export default function Analysis({ photoUrl, step }: { photoUrl: string; step: n
         )}
       </div>
       <ol className="steps" aria-live="polite">
-        {STEPS.map((label, i) => {
-          const state = i < step ? 'done' : i === step ? 'active' : 'pending'
-          return (
-            <li key={label} className={`step step-${state}`} aria-current={state === 'active' ? 'step' : undefined}>
-              <span className="step-mark">{state === 'done' && <Check />}</span>
-              {label}
-              {state === 'done' && <span className="visually-hidden"> — виконано</span>}
-            </li>
-          )
-        })}
+        {STEPS.map((label, i) => (
+          <li key={label} className={`step step-${i === 0 ? 'active' : 'pending'}`} aria-current={i === 0 ? 'step' : undefined}>
+            <span className="step-mark" />
+            {label}
+          </li>
+        ))}
       </ol>
     </main>
   )
